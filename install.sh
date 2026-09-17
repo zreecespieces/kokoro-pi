@@ -144,7 +144,11 @@ sed -e "s|@VENV@|$VENV|g" -e "s|@SOURCE@|$SOURCE|g" -e "s|@MODELS@|$MODELS|g" \
     -e "s|@CONFIG@|$CONFIG|g" -e "s|@SERVE_ARGS@|$SERVE_ARGS|g" \
     "$SOURCE/systemd/kokoro-pi.service" > "$UNIT_DIR/kokoro-pi.service"
 systemctl --user daemon-reload
-systemctl --user enable --now kokoro-pi.service
+systemctl --user enable kokoro-pi.service
+# Restart rather than `enable --now`: on a re-run the unit is already active and
+# `--now` leaves it alone, which silently keeps the old code running after an
+# upgrade.
+systemctl --user restart kokoro-pi.service
 # Without linger the service stops when the login session ends.
 loginctl enable-linger "$USER" 2>/dev/null || warn "could not enable linger; the service may stop on logout"
 
