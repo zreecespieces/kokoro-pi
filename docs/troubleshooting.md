@@ -21,6 +21,19 @@ project do it. Register it once.
 **The service stops when you log out** — linger is not enabled:
 `loginctl enable-linger $USER`.
 
+## Requests come back 429
+
+The engine synthesises one request at a time. A 429 carries `Retry-After` and means
+"occupied, try again" — retry it rather than treating it as failure. If you would rather
+requests queue server-side, raise `--wait-seconds`; if you would rather they fail
+immediately so you can queue them yourself, set `--wait-seconds 0`.
+
+## The audio is loud noise
+
+Almost always byte order. This service sends little-endian (`s16le`) unless asked
+otherwise, and some clients expect big-endian. Either send `"format": "l16"` per
+request, or start the service with `--default-format l16`.
+
 ## It is not faster than plain Kokoro
 
 Check which variant is live:

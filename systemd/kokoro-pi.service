@@ -7,7 +7,7 @@ After=network.target
 Type=simple
 Environment=PYTHONPATH=@SOURCE@/src
 Environment=PYTHONUNBUFFERED=1
-ExecStart=@VENV@/bin/python -m kokoro_pi serve --models @MODELS@ --port @PORT@ --threads @THREADS@
+ExecStart=@VENV@/bin/python -m kokoro_pi serve --models @MODELS@ --port @PORT@ --threads @THREADS@ @SERVE_ARGS@
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

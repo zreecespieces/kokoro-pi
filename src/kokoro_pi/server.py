@@ -139,7 +139,8 @@ class Engine:
         return np.asarray(audio, np.float32)
 
 
-def build_handler(engine: Engine, max_chars: int, wait_seconds: float):
+def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
+                  default_format: str = "s16le"):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "kokoro-pi"
@@ -194,7 +195,7 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float):
             if len(text) > max_chars:
                 self.reply(413, {"error": f"text longer than {max_chars} characters"})
                 return
-            layout = str(request.get("format", "s16le")).lower()
+            layout = str(request.get("format", default_format)).lower()
             if layout not in FORMATS:
                 self.reply(400, {"error": f"format must be one of {sorted(FORMATS)}"})
                 return
@@ -212,8 +213,18 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float):
                 return
             streaming = str(request.get("stream", "true")).lower() not in ("false", "0", "no")
 
-            if not engine.lock.acquire(timeout=wait_seconds):
-                self.reply(503, {"error": "busy synthesising; retry shortly"})
+            # 429 rather than 503: this means "occupied, come back", not "broken".
+            # wait_seconds of 0 fails fast, which suits callers that queue themselves.
+            acquired = (engine.lock.acquire(blocking=False) if wait_seconds <= 0
+                        else engine.lock.acquire(timeout=wait_seconds))
+            if not acquired:
+                payload = json.dumps({"error": "busy synthesising; retry shortly"}).encode()
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", "1")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
                 return
             started = time.perf_counter()
             committed = False
@@ -276,14 +287,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--max-chars", type=int, default=4000)
     parser.add_argument("--wait-seconds", type=float, default=30.0,
-                        help="how long a request waits for the engine before 503")
+                        help="how long a request waits for the engine before 429; 0 fails fast")
+    parser.add_argument("--default-format", default="s16le", choices=sorted(FORMATS),
+                        help="format used when a request does not name one; l16 is big-endian")
     parser.add_argument("--skip-verify", action="store_true", help="skip asset checksum verification")
     args = parser.parse_args(argv)
 
     engine = Engine(args.models, args.variant, args.threads, args.voice, verify=not args.skip_verify)
-    handler = build_handler(engine, args.max_chars, args.wait_seconds)
+    handler = build_handler(engine, args.max_chars, args.wait_seconds, args.default_format)
     print(f"kokoro-pi ready: variant={engine.variant} backend={engine.backend} "
-          f"voice={engine.voice} threads={engine.threads} http://{args.host}:{args.port}", flush=True)
+          f"voice={engine.voice} threads={engine.threads} format={args.default_format} "
+          f"http://{args.host}:{args.port}", flush=True)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print("note: serving beyond loopback. There is no authentication; put it behind "
               "something that has some.", flush=True)

@@ -215,8 +215,14 @@ been checked, so if one ever sounds off, serve it with `--variant float`.
 | `GET /readyz`, `GET /healthz` | `{"ready": true, "variant": "int8", "backend": "int8-fused", "busy": false}` |
 | `GET /v1/voices` | all 54 voices in the pack, and the default |
 
-Errors are JSON: 400 for a bad request, 413 for text that is too long, 503 if the engine
-stays busy past `--wait-seconds`.
+Errors are JSON: 400 for a bad request, 413 for text that is too long, and **429 with
+`Retry-After`** if the engine is still busy after `--wait-seconds` (it synthesises one
+request at a time). `--wait-seconds 0` fails fast with 429 instead of waiting, which
+suits callers that do their own queueing.
+
+Two flags matter when fitting this to an existing client: `--default-format l16` makes
+big-endian the default for clients that do not send a `format`, and `--threads` should
+match your core count.
 
 ## Choosing a variant
 

@@ -16,6 +16,7 @@ PORT=${KOKORO_PI_PORT:-8080}
 VOICE=${KOKORO_PI_VOICE:-af_heart}
 THREADS=${KOKORO_PI_THREADS:-$(nproc 2>/dev/null || echo 4)}
 SKIP_SERVICE=${KOKORO_PI_SKIP_SERVICE:-0}
+SERVE_ARGS=${KOKORO_PI_SERVE_ARGS:-}   # extra flags for the service, e.g. "--default-format l16"
 BUILD_ARGS=${KOKORO_PI_BUILD_ARGS:-}
 
 say() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
@@ -76,7 +77,7 @@ PYTHONPATH="$SOURCE/src" "$VENV/bin/python" -m kokoro_pi build \
 if [ "$SKIP_SERVICE" = "1" ]; then
   say "done (service step skipped)"
   echo "  start it yourself with:"
-  echo "    PYTHONPATH=$SOURCE/src $VENV/bin/python -m kokoro_pi serve --models $MODELS --port $PORT"
+  echo "    PYTHONPATH=$SOURCE/src $VENV/bin/python -m kokoro_pi serve --models $MODELS --port $PORT $SERVE_ARGS"
   exit 0
 fi
 
@@ -84,7 +85,7 @@ say "installing the user service"
 UNIT_DIR=$HOME/.config/systemd/user
 mkdir -p "$UNIT_DIR"
 sed -e "s|@VENV@|$VENV|g" -e "s|@SOURCE@|$SOURCE|g" -e "s|@MODELS@|$MODELS|g" \
-    -e "s|@PORT@|$PORT|g" -e "s|@THREADS@|$THREADS|g" \
+    -e "s|@PORT@|$PORT|g" -e "s|@THREADS@|$THREADS|g" -e "s|@SERVE_ARGS@|$SERVE_ARGS|g" \
     "$SOURCE/systemd/kokoro-pi.service" > "$UNIT_DIR/kokoro-pi.service"
 systemctl --user daemon-reload
 systemctl --user enable --now kokoro-pi.service
