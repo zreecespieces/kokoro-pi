@@ -7,7 +7,11 @@ After=network.target
 Type=simple
 Environment=PYTHONPATH=@SOURCE@/src
 Environment=PYTHONUNBUFFERED=1
-ExecStart=@VENV@/bin/python -m kokoro_pi serve --models @MODELS@ --port @PORT@ --threads @THREADS@ @SERVE_ARGS@
+# Every setting, including which models to serve, lives in the config file, so
+# this unit does not have to be edited to change a port. Flags after --config
+# still win, which is what SERVE_ARGS is for; `kokoro-pi config` shows what is
+# in force and where each value came from.
+ExecStart=@VENV@/bin/python -m kokoro_pi serve --config @CONFIG@ @SERVE_ARGS@
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

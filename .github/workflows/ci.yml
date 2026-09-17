@@ -32,10 +32,67 @@ jobs:
       - name: import every module
         run: |
           PYTHONPATH=src python -c "
-          from kokoro_pi import assets, graph, quantise, validate, server, build
+          from kokoro_pi import assets, config, graph, quantise, validate, server, build
           print('imports ok')"
       - name: the CLI explains itself
         run: PYTHONPATH=src python -m kokoro_pi --help
+      - name: configuration resolves in the documented order
+        run: |
+          cat > /tmp/kokoro-pi.toml <<'TOML'
+          models = "/tmp/models"
+          port = 9001
+          voices = ["af_heart", "bf_emma"]
+          [serve]
+          threads = 3
+          stream = false
+          TOML
+          PYTHONPATH=src KOKORO_PI_PORT=9999 python -c "
+          import os
+          from kokoro_pi import config as cfg
+
+          # file < environment, and a [serve] table applies to serve
+          s = cfg.resolve(cfg.SERVE, None, 'serve', '/tmp/kokoro-pi.toml')
+          assert str(s.models) == '/tmp/models', s.models
+          assert s.port == 9999, s.port
+          assert 'environment' in s.sources['port'], s.sources['port']
+          assert s.threads == 3 and s.stream is False, (s.threads, s.stream)
+          assert s.voices == ['af_heart', 'bf_emma'], s.voices
+
+          # environment < command line
+          import argparse
+          parser = argparse.ArgumentParser()
+          cfg.add_arguments(parser, cfg.SERVE)
+          args = parser.parse_args(['--port', '7000', '--no-stream', '--voices', 'af_heart'])
+          s = cfg.resolve(cfg.SERVE, args, 'serve', '/tmp/kokoro-pi.toml')
+          assert s.port == 7000 and s.sources['port'] == 'command line'
+          assert s.voices == ['af_heart'] and s.stream is False
+
+          # lists and booleans from the environment
+          os.environ['KOKORO_PI_VOICES'] = 'am_adam, bf_emma'
+          os.environ['KOKORO_PI_VERIFY'] = 'no'
+          s = cfg.resolve(cfg.SERVE, None, 'serve', '/tmp/kokoro-pi.toml')
+          assert s.voices == ['am_adam', 'bf_emma'], s.voices
+          assert s.verify is False
+
+          # a typo in the file is a startup error, not a silent default
+          open('/tmp/bad.toml', 'w').write('prot = 1\n')
+          try:
+              cfg.resolve(cfg.SERVE, None, 'serve', '/tmp/bad.toml')
+              raise AssertionError('expected an unknown-setting failure')
+          except SystemExit as error:
+              assert 'unknown setting' in str(error), error
+
+          # the voice's own language, which is what auto is for
+          assert cfg.language_for('bf_emma') == 'en-gb'
+          assert cfg.language_for('af_heart') == 'en-us'
+          assert cfg.language_for('bf_emma', 'en-us') == 'en-us'
+          print('configuration ok')"
+
+      - name: the config command explains itself
+        run: |
+          PYTHONPATH=src python -m kokoro_pi config
+          PYTHONPATH=src python -m kokoro_pi config --markdown | head -3
+
       - name: streaming split behaves
         run: |
           PYTHONPATH=src python -c "

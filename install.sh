@@ -13,11 +13,15 @@ set -euo pipefail
 REPO=${KOKORO_PI_REPO:-https://github.com/zreecespieces/kokoro-pi.git}
 PREFIX=${KOKORO_PI_PREFIX:-$HOME/.kokoro-pi}
 PORT=${KOKORO_PI_PORT:-8080}
+HOST=${KOKORO_PI_HOST:-127.0.0.1}
 VOICE=${KOKORO_PI_VOICE:-af_heart}
 THREADS=${KOKORO_PI_THREADS:-$(nproc 2>/dev/null || echo 4)}
 SKIP_SERVICE=${KOKORO_PI_SKIP_SERVICE:-0}
 SERVE_ARGS=${KOKORO_PI_SERVE_ARGS:-}   # extra flags for the service, e.g. "--default-format l16"
 BUILD_ARGS=${KOKORO_PI_BUILD_ARGS:-}
+# Everything the service reads lives here afterwards, editable without touching
+# the unit. Existing files are never overwritten.
+CONFIG=${KOKORO_PI_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/kokoro-pi/config.toml}
 
 say() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$1" >&2; }
@@ -92,10 +96,44 @@ else
     --models "$MODELS" --voice "$VOICE" --threads "$THREADS" $BUILD_ARGS
 fi
 
+say "writing the configuration"
+if [ -f "$CONFIG" ]; then
+  echo "  $CONFIG already exists, leaving it alone"
+else
+  mkdir -p "$(dirname "$CONFIG")"
+  cat > "$CONFIG" <<EOF
+# kokoro-pi configuration. Restart the service after editing:
+#   systemctl --user restart kokoro-pi
+# Every setting, and what it does: https://github.com/zreecespieces/kokoro-pi/blob/main/docs/configuration.md
+# See what is actually in force: kokoro-pi config
+
+models = "$MODELS"
+host   = "$HOST"
+port   = $PORT
+voice  = "$VOICE"
+threads = $THREADS
+
+# Restrict which voices this service will speak. Empty means all 54.
+# voices = ["af_heart", "bf_emma"]
+
+# "auto" takes the language from the voice's name, so bf_emma gets British
+# phonemes. Set it explicitly to read any voice any language.
+# lang = "auto"
+
+# Bind beyond loopback and this is the difference between a speech service and
+# an open one.
+# api_key = "change-me"
+
+# Let a browser page call this service directly.
+# allow_origin = "*"
+EOF
+  echo "  wrote $CONFIG"
+fi
+
 if [ "$SKIP_SERVICE" = "1" ]; then
   say "done (service step skipped)"
   echo "  start it yourself with:"
-  echo "    PYTHONPATH=$SOURCE/src $VENV/bin/python -m kokoro_pi serve --models $MODELS --port $PORT $SERVE_ARGS"
+  echo "    PYTHONPATH=$SOURCE/src $VENV/bin/python -m kokoro_pi serve --config $CONFIG $SERVE_ARGS"
   exit 0
 fi
 
@@ -103,7 +141,7 @@ say "installing the user service"
 UNIT_DIR=$HOME/.config/systemd/user
 mkdir -p "$UNIT_DIR"
 sed -e "s|@VENV@|$VENV|g" -e "s|@SOURCE@|$SOURCE|g" -e "s|@MODELS@|$MODELS|g" \
-    -e "s|@PORT@|$PORT|g" -e "s|@THREADS@|$THREADS|g" -e "s|@SERVE_ARGS@|$SERVE_ARGS|g" \
+    -e "s|@CONFIG@|$CONFIG|g" -e "s|@SERVE_ARGS@|$SERVE_ARGS|g" \
     "$SOURCE/systemd/kokoro-pi.service" > "$UNIT_DIR/kokoro-pi.service"
 systemctl --user daemon-reload
 systemctl --user enable --now kokoro-pi.service
@@ -132,6 +170,8 @@ cat <<EOF
   Measure it here:
     PYTHONPATH=$SOURCE/src $VENV/bin/python -m kokoro_pi validate --models $MODELS
 
+  Configure: $CONFIG
+             PYTHONPATH=$SOURCE/src $VENV/bin/python -m kokoro_pi config
   Service:   systemctl --user status kokoro-pi
   Logs:      journalctl --user -u kokoro-pi -f
 EOF

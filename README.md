@@ -13,7 +13,7 @@ Same model, same voice, **~2× faster synthesis** and speech that **starts 6× s
 because the vocoder's convolutions run through a hand-written int8 ARM kernel and long
 text is streamed clause by clause.
 
-[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [How it works](docs/how-it-works.md) · [Quality](docs/quality.md) · [Samples](samples) · [API](#http-api)
+[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Quality](docs/quality.md) · [Samples](samples) · [API](#http-api)
 
 </div>
 
@@ -175,8 +175,8 @@ still has a single scale. It beats ONNX Runtime's own int8 path (336 GOP/s) by 3
 
 ## HTTP API
 
-Loopback only by default. There is no authentication — put it behind something that has
-some before exposing it.
+Loopback only by default. Set `api_key` to require a key, and `allow_origin` to let a
+browser page call it — see [configuration](docs/configuration.md).
 
 ### `POST /v1/tts`
 
@@ -184,6 +184,7 @@ some before exposing it.
 {
   "text": "Required. Up to 4000 characters by default.",
   "voice": "af_heart",   // optional, see GET /v1/voices
+  "lang": "en-us",       // optional; the voice's own language by default
   "speed": 1.0,          // optional, 0.5 to 2.0
   "format": "s16le",     // s16le (default) | l16 | wav
   "stream": true         // optional; false synthesises everything before responding
@@ -204,25 +205,36 @@ Response headers carry `X-Kokoro-Backend`, `X-Audio-Rate`, `X-Audio-Format` and
 `GET /v1/tts?text=...&format=wav` does the same thing and is friendlier in a browser.
 
 The voice pack ships **54 voices** (`af_heart`, `am_adam`, `bf_emma`, …). Pass any of
-them as `voice`; `GET /v1/voices` lists them all. Only the default is calibrated for the
-int8 build — other voices work and sound right, but their activation ranges have not
-been checked, so if one ever sounds off, serve it with `--variant float`.
+them as `voice`; `GET /v1/voices` lists the ones this service offers. Set `voices` to
+narrow that to the handful you actually use, so the list is an honest menu and a typo is
+a 400 rather than a surprise accent.
+
+A voice's name says what language it was trained to speak, and `lang = "auto"` — the
+default — reads it from there, so `bf_emma` gets British phonemes rather than American
+ones. Only `en-us` and `en-gb` are tested; the Japanese and Chinese voices need a
+phonemiser this does not ship. [The detail, and the table](docs/configuration.md#lang--which-phonemes-the-words-become).
+
+Only the default voice is calibrated for the int8 build — other voices work and sound
+right, but their activation ranges have not been checked, so if one ever sounds off,
+serve it with `--variant float`.
 
 ### Other endpoints
 
 | Endpoint | Returns |
 |---|---|
-| `GET /readyz`, `GET /healthz` | `{"ready": true, "variant": "int8", "backend": "int8-fused", "busy": false}` |
-| `GET /v1/voices` | all 54 voices in the pack, and the default |
+| `GET /readyz` | `{"ready": true, "variant": "int8", "backend": "int8-fused", "voices": 54, "lang": "auto", "busy": false}` |
+| `GET /healthz` | `{"ready": true}` — always open, so a monitor needs no key |
+| `GET /v1/voices` | the voices this service offers, the default, and each one's language |
 
 Errors are JSON: 400 for a bad request, 413 for text that is too long, and **429 with
 `Retry-After`** if the engine is still busy after `--wait-seconds` (it synthesises one
 request at a time). `--wait-seconds 0` fails fast with 429 instead of waiting, which
 suits callers that do their own queueing.
 
-Two flags matter when fitting this to an existing client: `--default-format l16` makes
-big-endian the default for clients that do not send a `format`, and `--threads` should
-match your core count.
+Two settings matter when fitting this to an existing client: `default_format = "l16"`
+makes big-endian the default for clients that do not send a `format`, and `wait_seconds
+= 0` fails fast for clients that queue themselves. Both, and everything else, can come
+from a flag, the environment or a config file — [configuration](docs/configuration.md).
 
 ## Choosing a variant
 
@@ -273,10 +285,12 @@ kokoro-pi build      derive the optimised models from the upstream export
 kokoro-pi serve      run the resident HTTP speech service
 kokoro-pi validate   measure quality and speed across the built variants
 kokoro-pi say        speak some text through a running service
+kokoro-pi config     print the configuration in force, and where each value came from
 ```
 
 `kokoro-pi say "Good morning"` streams to your speakers; `--out morning.wav` writes a
-file instead.
+file instead. It reads the same configuration the service does, so it finds a service
+that was moved to another port without being told twice.
 
 ## Service management
 
@@ -287,7 +301,9 @@ journalctl --user -u kokoro-pi -f
 ```
 
 The unit is installed at `~/.config/systemd/user/kokoro-pi.service` and the installer
-enables linger so it survives logout and reboot.
+enables linger so it survives logout and reboot. Settings live in
+`~/.config/kokoro-pi/config.toml`, not in the unit, so changing a port or a voice is
+editing a file and restarting — `kokoro-pi config` shows what is in force.
 
 ## Project layout
 
@@ -297,13 +313,14 @@ native/           the two custom operators, plus vendored ONNX Runtime headers
   quant_conv_op.cpp   fused int8 convolution (SDOT)
 src/kokoro_pi/
   build.py            orchestrates: fetch, compile, rewrite, calibrate, verify
+  config.py           the one option table: flags, environment, file, defaults
   graph.py            the four algebra-preserving graph rewrites
   quantise.py         calibration, weight folding, packing, graph surgery
   server.py           the resident service and clause streaming
   validate.py         spectral quality and speed measurement
 corpus/           nine calibration utterances and six disjoint held-out ones
 tools/            bench_http.py, for measuring any endpoint
-docs/             how it works, quality methodology, benchmarks, troubleshooting
+docs/             configuration, how it works, quality methodology, benchmarks, roadmap
 ```
 
 ## Troubleshooting

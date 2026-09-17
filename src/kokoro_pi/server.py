@@ -11,6 +11,7 @@ The model stays resident, so there is no per-request load cost.
 from __future__ import annotations
 
 import argparse
+import hmac
 import io
 import json
 import re
@@ -23,9 +24,12 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
+from . import config as cfg
+
 RATE = 24000
-FORMATS = {"s16le", "l16", "wav"}
+FORMATS = set(cfg.FORMATS)
 SENTENCE = re.compile(r"(?<=[.!?…])\s+|\n+")
+LANG = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$")
 CLAUSE = re.compile(r"(?<=[,;:])\s+")
 
 
@@ -80,7 +84,8 @@ class Engine:
     """The resident model, plus whatever the manifest says about how it was built."""
 
     def __init__(self, models: Path, variant: str | None = None, threads: int = 4,
-                 voice: str | None = None, verify: bool = True):
+                 voice: str | None = None, verify: bool = True,
+                 allowed: list[str] | None = None, lang: str = "auto", speed: float = 1.0):
         import onnxruntime as ort
         from kokoro_onnx import Kokoro
 
@@ -98,6 +103,9 @@ class Engine:
         chosen = self.manifest["variants"][self.variant]
         self.backend = chosen["backend"]
         self.voice = voice or self.manifest.get("voice", "af_heart")
+        self.lang = lang
+        self.speed = speed
+        self.allowed = [name for name in (allowed or []) if name]
         checksums = self.manifest.get("checksums", {})
 
         needed = [chosen["model"], "voices-v1.0.bin", *chosen.get("custom_ops", [])]
@@ -119,51 +127,119 @@ class Engine:
         self.kokoro = Kokoro.from_session(self.session, str(models / "voices-v1.0.bin"))
         self.threads = threads
         self.lock = threading.Lock()
+        available = self._pack_voices()
+        if self.allowed:
+            missing = [name for name in self.allowed if name not in available]
+            if missing:
+                raise SystemExit(f"voices not in the pack: {', '.join(missing)}\n"
+                                 f"  have {len(available)}; see `kokoro-pi say --help` or /v1/voices")
+            available = [name for name in available if name in self.allowed]
+        self._voices = available
+        if self.voice not in self._voices:
+            raise SystemExit(f"default voice {self.voice!r} is not among the voices this service "
+                             f"offers ({', '.join(self._voices)})")
         self.synthesise("Ready.")  # warm the graph so the first real request is not the slow one
 
-    def voices(self) -> list[str]:
+    def _pack_voices(self) -> list[str]:
         try:
             names = list(self.kokoro.get_voices())
         except Exception:  # an older kokoro-onnx without the accessor
             names = []
         return sorted(names) or [self.voice]
 
-    def synthesise(self, text: str, voice: str | None = None, speed: float = 1.0,
-                   trim: bool = True) -> np.ndarray:
+    def voices(self) -> list[str]:
+        """What this service will speak -- the pack, narrowed by any allowlist."""
+        return self._voices
+
+    def language_for(self, voice: str) -> str:
+        return cfg.language_for(voice, self.lang)
+
+    def synthesise(self, text: str, voice: str | None = None, speed: float | None = None,
+                   trim: bool = True, lang: str | None = None) -> np.ndarray:
         # Measurement passes trim=False: trimming can remove a different amount of silence
         # per variant, which misaligns the waveforms being compared.
-        audio, rate = self.kokoro.create(text, voice=voice or self.voice, lang="en-us",
-                                         speed=speed, trim=trim)
+        chosen = voice or self.voice
+        audio, rate = self.kokoro.create(text, voice=chosen,
+                                         lang=lang or self.language_for(chosen),
+                                         speed=self.speed if speed is None else speed, trim=trim)
         if rate != RATE or not len(audio) or not np.isfinite(audio).all():
             raise ValueError("synthesis produced invalid audio")
         return np.asarray(audio, np.float32)
 
 
-def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
-                  default_format: str = "s16le"):
+def build_handler(engine: Engine, settings):
+    max_chars = settings.max_chars
+    wait_seconds = settings.wait_seconds
+    default_format = settings.default_format
+    api_key = settings.api_key
+    allow_origin = settings.allow_origin
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "kokoro-pi"
 
-        def log_message(self, *_):
-            pass  # spoken text never goes to a log
+        def log_message(self, fmt, *args):
+            # Off by default and never the text: a speech log is a transcript of
+            # somebody's day. On, it is method, route and status, nothing else.
+            if settings.log_requests:
+                super().log_message(fmt, *args)
+
+        def cors(self):
+            if allow_origin:
+                self.send_header("Access-Control-Allow-Origin", allow_origin)
+                self.send_header("Vary", "Origin")
+
+        def authorised(self) -> bool:
+            """Constant-time comparison, because a timing oracle on a shared key is real."""
+            if not api_key:
+                return True
+            header = self.headers.get("Authorization", "")
+            offered = header[7:] if header.lower().startswith("bearer ") else self.headers.get("X-API-Key", "")
+            return hmac.compare_digest(str(offered), str(api_key))
+
+        def refuse(self):
+            self.reply(401, {"error": "missing or wrong API key"})
+            self.close_connection = True
 
         def reply(self, status: int, value: dict):
             payload = json.dumps(value).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
+            self.cors()
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
 
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.cors()
+            if allow_origin:
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
+                self.send_header("Access-Control-Max-Age", "86400")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def do_GET(self):
             route = urlparse(self.path)
-            if route.path in ("/healthz", "/readyz"):
+            # /healthz stays open and says nothing useful to a stranger, so a
+            # monitor does not need the key and a probe does not leak the setup.
+            if route.path == "/healthz":
+                self.reply(200, {"ready": True})
+                return
+            if route.path.startswith("/v1") or route.path == "/readyz":
+                if not self.authorised():
+                    self.refuse()
+                    return
+            if route.path == "/readyz":
                 self.reply(200, {"ready": True, "backend": engine.backend, "variant": engine.variant,
-                                 "voice": engine.voice, "threads": engine.threads,
+                                 "voice": engine.voice, "voices": len(engine.voices()),
+                                 "lang": engine.lang, "threads": engine.threads,
+                                 "format": default_format, "stream": settings.stream,
                                  "busy": engine.lock.locked()})
             elif route.path == "/v1/voices":
-                self.reply(200, {"voices": engine.voices(), "default": engine.voice})
+                self.reply(200, {"voices": engine.voices(), "default": engine.voice,
+                                 "languages": {name: engine.language_for(name) for name in engine.voices()}})
             elif route.path == "/v1/tts":
                 query = parse_qs(route.query)
                 self.speak({key: value[0] for key, value in query.items()})
@@ -173,6 +249,9 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
         def do_POST(self):
             if urlparse(self.path).path != "/v1/tts":
                 self.reply(404, {"error": "not found"})
+                return
+            if not self.authorised():
+                self.refuse()
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -201,17 +280,21 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
                 return
             voice = request.get("voice") or engine.voice
             if voice not in engine.voices():
-                self.reply(400, {"error": f"unknown voice {voice!r}"})
+                self.reply(400, {"error": f"unknown voice {voice!r}; see /v1/voices"})
                 return
             try:
-                speed = float(request.get("speed", 1.0))
+                speed = float(request.get("speed", engine.speed))
             except (TypeError, ValueError):
                 self.reply(400, {"error": "speed must be a number"})
                 return
             if not 0.5 <= speed <= 2.0:
                 self.reply(400, {"error": "speed must be between 0.5 and 2.0"})
                 return
-            streaming = str(request.get("stream", "true")).lower() not in ("false", "0", "no")
+            lang = request.get("lang") or engine.language_for(voice)
+            if not LANG.match(str(lang)):
+                self.reply(400, {"error": "lang must be a phonemiser code such as en-us or en-gb"})
+                return
+            streaming = str(request.get("stream", settings.stream)).lower() not in ("false", "0", "no")
 
             # 429 rather than 503: this means "occupied, come back", not "broken".
             # wait_seconds of 0 fails fast, which suits callers that queue themselves.
@@ -221,6 +304,7 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
                 payload = json.dumps({"error": "busy synthesising; retry shortly"}).encode()
                 self.send_response(429)
                 self.send_header("Content-Type", "application/json")
+                self.cors()
                 self.send_header("Retry-After", "1")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
@@ -229,14 +313,17 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
             started = time.perf_counter()
             committed = False
             try:
-                pieces = split_for_streaming(text) if streaming else [text.strip()]
+                pieces = (split_for_streaming(text, settings.stream_limit) if streaming
+                          else [text.strip()])
                 if layout == "wav" or not streaming:
                     # A complete file needs its length up front, so buffer it.
-                    audio = np.concatenate([engine.synthesise(piece, voice, speed) for piece in pieces])
+                    audio = np.concatenate([engine.synthesise(piece, voice, speed, lang=lang)
+                                            for piece in pieces])
                     payload = wav_bytes(audio) if layout == "wav" else to_bytes(audio, layout)
                     self.send_response(200)
                     self.send_header("Content-Type", "audio/wav" if layout == "wav"
                                      else f"audio/L16; rate={RATE}; channels=1")
+                    self.cors()
                     self.send_header("Content-Length", str(len(payload)))
                     self.send_header("X-Kokoro-Backend", engine.backend)
                     self.send_header("X-Audio-Seconds", f"{audio.size / RATE:.3f}")
@@ -252,12 +339,13 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
                 self.send_header("X-Audio-Rate", str(RATE))
                 self.send_header("X-Kokoro-Backend", engine.backend)
                 self.send_header("X-Stream-Pieces", str(len(pieces)))
+                self.cors()
                 self.send_header("Transfer-Encoding", "chunked")
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 committed = True
                 for piece in pieces:
-                    block = to_bytes(engine.synthesise(piece, voice, speed), layout)
+                    block = to_bytes(engine.synthesise(piece, voice, speed, lang=lang), layout)
                     for start in range(0, len(block), 8192):
                         part = block[start:start + 8192]
                         self.wfile.write(f"{len(part):X}\r\n".encode() + part + b"\r\n")
@@ -278,30 +366,47 @@ def build_handler(engine: Engine, max_chars: int, wait_seconds: float,
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="kokoro-pi serve", description="Resident Kokoro speech service")
-    parser.add_argument("--models", type=Path, required=True, help="directory holding models.json")
-    parser.add_argument("--variant", help="int8 (default), float, or upstream")
-    parser.add_argument("--voice", help="override the manifest's default voice")
-    parser.add_argument("--host", default="127.0.0.1", help="default is loopback only")
-    parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--max-chars", type=int, default=4000)
-    parser.add_argument("--wait-seconds", type=float, default=30.0,
-                        help="how long a request waits for the engine before 429; 0 fails fast")
-    parser.add_argument("--default-format", default="s16le", choices=sorted(FORMATS),
-                        help="format used when a request does not name one; l16 is big-endian")
-    parser.add_argument("--skip-verify", action="store_true", help="skip asset checksum verification")
+    parser = argparse.ArgumentParser(
+        prog="kokoro-pi serve", description="Resident Kokoro speech service",
+        epilog="Every option can also be set in a config file or the environment: "
+               "see docs/configuration.md, or run `kokoro-pi config` to see what is in force.")
+    parser.add_argument("--config", help="path to a TOML config file")
+    parser.add_argument("--print-config", action="store_true",
+                        help="print the effective configuration and exit")
+    # Kept because installs in the field pass it; --no-verify is the spelling now.
+    parser.add_argument("--skip-verify", dest="verify", action="store_false", default=None,
+                        help=argparse.SUPPRESS)
+    cfg.add_arguments(parser, cfg.SERVE)
     args = parser.parse_args(argv)
 
-    engine = Engine(args.models, args.variant, args.threads, args.voice, verify=not args.skip_verify)
-    handler = build_handler(engine, args.max_chars, args.wait_seconds, args.default_format)
+    printing = args.print_config
+    del args.print_config
+    settings = cfg.resolve(cfg.SERVE, args, "serve", args.config)
+    if printing:
+        print("kokoro-pi serve\n")
+        print(cfg.describe(settings, cfg.SERVE))
+        return
+    if settings.models is None:
+        raise cfg.ConfigError(
+            "no models directory. Pass --models, set KOKORO_PI_MODELS, or put\n"
+            '  models = "~/.kokoro-pi/models"\n'
+            f"  in one of: {', '.join(str(path) for path in cfg.config_paths())}")
+
+    engine = Engine(settings.models, settings.variant, settings.threads, settings.voice,
+                    verify=settings.verify, allowed=settings.voices, lang=settings.lang,
+                    speed=settings.speed)
+    handler = build_handler(engine, settings)
     print(f"kokoro-pi ready: variant={engine.variant} backend={engine.backend} "
-          f"voice={engine.voice} threads={engine.threads} format={args.default_format} "
-          f"http://{args.host}:{args.port}", flush=True)
-    if args.host not in ("127.0.0.1", "localhost", "::1"):
-        print("note: serving beyond loopback. There is no authentication; put it behind "
-              "something that has some.", flush=True)
-    ThreadingHTTPServer((args.host, args.port), handler).serve_forever()
+          f"voice={engine.voice} voices={len(engine.voices())} lang={settings.lang} "
+          f"threads={engine.threads} format={settings.default_format} "
+          f"http://{settings.host}:{settings.port}", flush=True)
+    if settings.host not in ("127.0.0.1", "localhost", "::1") and not settings.api_key:
+        print("note: serving beyond loopback with no API key. Set api_key, or put it behind "
+              "something that authenticates.", flush=True)
+    if settings.allow_origin == "*":
+        print("note: Access-Control-Allow-Origin is *, so any web page may call this service.",
+              flush=True)
+    ThreadingHTTPServer((settings.host, settings.port), handler).serve_forever()
 
 
 if __name__ == "__main__":
