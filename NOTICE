@@ -1,0 +1,30 @@
+kokoro-pi
+Copyright (c) 2026 Zachary Reece
+Licensed under the MIT License (see LICENSE).
+
+This project optimises and serves models it does not ship. It builds on:
+
+Kokoro-82M
+  https://huggingface.co/hexgrad/Kokoro-82M
+  Copyright (c) hexgrad. Licensed under the Apache License, Version 2.0.
+  The speech model itself. kokoro-pi downloads the ONNX export at install time and
+  rewrites it; the weights are unchanged apart from the documented int8 quantisation
+  of the vocoder's convolutions.
+
+kokoro-onnx
+  https://github.com/thewh1teagle/kokoro-onnx
+  Copyright (c) thewh1teagle. Licensed under the MIT License.
+  Provides the ONNX export, the voice pack, and the tokenisation and phonemisation
+  front end this service calls. Model files are downloaded from its releases.
+
+ONNX Runtime
+  https://github.com/microsoft/onnxruntime
+  Copyright (c) Microsoft Corporation. Licensed under the MIT License.
+  The inference engine. The five public C and C++ API headers under native/include are
+  vendored unmodified from release 1.23 (API version 23) so the custom operators can be
+  compiled without a source checkout or a matching pip package layout.
+
+espeak-ng, via espeakng-loader and phonemizer-fork
+  https://github.com/espeak-ng/espeak-ng (GPLv3)
+  Used at runtime for phonemisation, through the dependencies above. It is invoked as
+  a separate library and is not linked into or redistributed by this project.

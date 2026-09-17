@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  native:
+    name: compile operators (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - name: build the operator library
+        run: bash native/build.sh libkokoro_pi_ops.so
+      - name: check it exports the entry point
+        run: nm -D native/libkokoro_pi_ops.so | grep RegisterCustomOps
+
+  python:
+    name: package imports and CLI responds
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: import every module
+        run: |
+          PYTHONPATH=src python -c "
+          from kokoro_pi import assets, graph, quantise, validate, server, build
+          print('imports ok')"
+      - name: the CLI explains itself
+        run: PYTHONPATH=src python -m kokoro_pi --help
+      - name: streaming split behaves
+        run: |
+          PYTHONPATH=src python -c "
+          from kokoro_pi.server import split_for_streaming
+          pieces = split_for_streaming('One sentence here. And a second one, with a clause, following it.')
+          assert len(pieces) == 2, pieces
+          long = split_for_streaming('word ' * 200)
+          assert all(len(p) <= 180 for p in long), [len(p) for p in long]
+          assert split_for_streaming('no terminator') == ['no terminator']
+          print('streaming split ok:', len(pieces), 'and', len(long), 'pieces')"

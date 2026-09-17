@@ -1,0 +1,34 @@
+{
+  "fixtures": [
+    {
+      "id": "heldout-short-1",
+      "class": "short",
+      "text": "Good evening, Maya."
+    },
+    {
+      "id": "heldout-short-2",
+      "class": "short",
+      "text": "Did the package arrive?"
+    },
+    {
+      "id": "heldout-medium-1",
+      "class": "medium",
+      "text": "On Tuesday, the museum opens at nine and closes shortly after sunset."
+    },
+    {
+      "id": "heldout-medium-2",
+      "class": "medium",
+      "text": "Jordan measured three cups of flour before adding the warm water slowly."
+    },
+    {
+      "id": "heldout-long-1",
+      "class": "long",
+      "text": "A narrow footpath followed the river through the forest, crossed two wooden bridges, and ended beside a quiet lake where several families had gathered for lunch."
+    },
+    {
+      "id": "heldout-long-2",
+      "class": "long",
+      "text": "When the afternoon meeting ended, Elena reviewed every note, corrected the final schedule, and sent a clear summary to the volunteers who would arrive early the following morning."
+    }
+  ]
+}

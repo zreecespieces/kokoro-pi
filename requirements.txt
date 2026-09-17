@@ -1,0 +1,9 @@
+# onnxruntime is pinned: the native operators are compiled against its API version 23
+# (headers vendored in native/include), and a different major may refuse to load them.
+onnxruntime==1.30.0
+# The rest float within a tested major so a stock Python (3.11 through 3.13) can resolve wheels.
+kokoro-onnx>=0.4.9,<0.5
+onnx>=1.17,<2
+numpy>=2.1,<3
+espeakng-loader>=0.2.4
+phonemizer-fork>=3.3.2

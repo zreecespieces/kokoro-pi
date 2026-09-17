@@ -1,0 +1,49 @@
+{
+  "fixtures": [
+    {
+      "id": "short-1",
+      "class": "short",
+      "text": "Hello."
+    },
+    {
+      "id": "short-2",
+      "class": "short",
+      "text": "A bright day."
+    },
+    {
+      "id": "short-3",
+      "class": "short",
+      "text": "Please read this."
+    },
+    {
+      "id": "medium-1",
+      "class": "medium",
+      "text": "The little red kite rose steadily above the quiet green field."
+    },
+    {
+      "id": "medium-2",
+      "class": "medium",
+      "text": "Zachary packed a warm coat, checked the train time, and walked toward the station."
+    },
+    {
+      "id": "medium-3",
+      "class": "medium",
+      "text": "Before sunrise, the baker mixed the dough and opened the shop for the neighborhood."
+    },
+    {
+      "id": "long-1",
+      "class": "long",
+      "text": "The library was almost empty when the rain began. A student closed the tall windows, gathered the books from the reading table, and listened as the storm moved slowly across the city."
+    },
+    {
+      "id": "long-2",
+      "class": "long",
+      "text": "Every autumn the families along the valley prepare for colder evenings by stacking dry wood beside their homes and checking each roof for loose tiles while the children collect bright leaves from the winding road"
+    },
+    {
+      "id": "long-3",
+      "class": "long",
+      "text": "At the edge of the harbor, an old mechanic carefully restored a small blue boat that had not crossed the bay in many years. She replaced the worn ropes, repaired the wooden deck, polished every brass fitting, and tested the quiet engine twice. When the work was finally complete, neighbors carried food and blankets aboard for a long afternoon voyage beneath the clear summer sky. They waved from the pier as the boat passed the lighthouse, turned toward the open water, and followed a line of silver birds beyond the island"
+    }
+  ]
+}

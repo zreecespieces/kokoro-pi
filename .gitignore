@@ -1,0 +1,14 @@
+# Built and downloaded artifacts: everything here is reproducible with `kokoro-pi build`.
+models/
+*.onnx
+*.so
+*.dylib
+*.npz
+*.part
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+reports/
