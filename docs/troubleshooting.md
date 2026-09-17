@@ -12,7 +12,16 @@ journalctl --user -u kokoro-pi -n 50 --no-pager
 delete them and the build will re-download and re-derive.
 
 **`no models.json in <dir>`** — the build never finished. Run it again; it skips the
-download if the upstream files are already there and verified.
+download if the upstream files are already there and verified, and re-running
+`install.sh` skips the whole build when a manifest already exists (set
+`KOKORO_PI_REBUILD=1` to force one).
+
+**`ModuleNotFoundError: No module named 'kokoro_pi'`** — the unit's `PYTHONPATH` points
+somewhere the service cannot see. The installer copies the source into
+`~/.kokoro-pi/src` for exactly this reason, because the unit sets `PrivateTmp=true`
+(so a clone under `/tmp` is invisible to it) and `/tmp` is cleared on reboot. Re-run
+`install.sh`, or edit the `PYTHONPATH` line in
+`~/.config/systemd/user/kokoro-pi.service` to a directory that persists.
 
 **`Domain already set in registry`** — the same custom-op domain was registered twice.
 That happens if you pass the operator library to ONNX Runtime yourself *and* let this

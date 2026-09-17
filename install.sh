@@ -50,8 +50,21 @@ echo "  $(uname -m) $(uname -s), ${THREADS} threads, ${AVAILABLE} MB free"
 
 SOURCE=$PREFIX/src
 if [ -f "$(dirname "$0")/src/kokoro_pi/build.py" ]; then
-  SOURCE=$(cd "$(dirname "$0")" && pwd)
-  say "installing from this clone: $SOURCE"
+  CLONE=$(cd "$(dirname "$0")" && pwd)
+  case "$CLONE/" in
+    "$PREFIX"/*)
+      SOURCE=$CLONE
+      say "installing from this clone: $SOURCE"
+      ;;
+    *)
+      # The service must not depend on a directory that can disappear or that systemd
+      # hides from it: PrivateTmp gives the unit its own /tmp, so a clone there is
+      # invisible, and /tmp is cleared on reboot anyway.
+      say "copying this clone into $SOURCE so the service has a stable path"
+      mkdir -p "$SOURCE"
+      tar -C "$CLONE" --exclude .git --exclude models --exclude venv -cf - . | tar -C "$SOURCE" -xf -
+      ;;
+  esac
 else
   say "fetching kokoro-pi"
   mkdir -p "$PREFIX"
@@ -69,10 +82,15 @@ VENV=$PREFIX/venv
 "$VENV/bin/pip" install --quiet -r "$SOURCE/requirements.txt"
 echo "  $("$VENV/bin/python" -c 'import onnxruntime, numpy; print("onnxruntime", onnxruntime.__version__, "numpy", numpy.__version__)')"
 
-say "building models (this is the slow part: a 177 MB download, then a few minutes of CPU)"
 MODELS=$PREFIX/models
-PYTHONPATH="$SOURCE/src" "$VENV/bin/python" -m kokoro_pi build \
-  --models "$MODELS" --voice "$VOICE" --threads "$THREADS" $BUILD_ARGS
+if [ -f "$MODELS/models.json" ] && [ -z "${KOKORO_PI_REBUILD:-}" ]; then
+  say "models already built in $MODELS (set KOKORO_PI_REBUILD=1 to rebuild)"
+  echo "  the service verifies every asset's checksum at startup, so a damaged build fails loudly"
+else
+  say "building models (this is the slow part: a 177 MB download, then a few minutes of CPU)"
+  PYTHONPATH="$SOURCE/src" "$VENV/bin/python" -m kokoro_pi build \
+    --models "$MODELS" --voice "$VOICE" --threads "$THREADS" $BUILD_ARGS
+fi
 
 if [ "$SKIP_SERVICE" = "1" ]; then
   say "done (service step skipped)"
