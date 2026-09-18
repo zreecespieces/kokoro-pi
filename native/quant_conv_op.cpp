@@ -176,8 +176,14 @@ void ComputeBlock(const Plan& plan, int64_t unit) {
             }
           }
         }
+        // std::fma, not `total * scale + bias`: the dot-product path finishes
+        // with vfmaq_f32, which rounds once. Two roundings here would differ by
+        // half a ULP -- and this vocoder turns 1e-7 into the ~22 dB phase-chaos
+        // floor, so a Pi 4 and a Pi 5 would produce visibly different waveforms
+        // for no reason anyone could ever find. ARMv8 has FMADD in the base ISA,
+        // so this costs nothing.
         plan.y[(tile * kOutputTile + o) * plan.out_width + position] =
-            static_cast<float>(total) * scales[o] + biases[o];
+            std::fma(static_cast<float>(total), scales[o], biases[o]);
       }
     }
   }
