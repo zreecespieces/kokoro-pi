@@ -80,6 +80,8 @@ live service is doing, ask it: `curl -s localhost:8080/readyz`, or start it with
 | `--stream-limit` | `stream_limit` / `KOKORO_PI_STREAM_LIMIT` | `180` | longest streamed piece, in characters; smaller starts sooner and phrases worse |
 | `--api-key` | `api_key` / `KOKORO_PI_API_KEY` | `—` | require this key on /v1 routes, as Bearer or X-API-Key; unset means no auth |
 | `--allow-origin` | `allow_origin` / `KOKORO_PI_ALLOW_ORIGIN` | `—` | value for Access-Control-Allow-Origin, so a browser page can call this |
+| `--wyoming` | `wyoming` / `KOKORO_PI_WYOMING` | `false` | also serve the Wyoming protocol, which is how Home Assistant talks to a voice service |
+| `--wyoming-port` | `wyoming_port` / `KOKORO_PI_WYOMING_PORT` | `10200` | port for the Wyoming listener |
 | `--verify` | `verify` / `KOKORO_PI_VERIFY` | `true` | verify every asset's checksum at startup |
 | `--log-requests` | `log_requests` / `KOKORO_PI_LOG_REQUESTS` | `false` | log one line per request. Never includes the text being spoken |
 
@@ -118,6 +120,14 @@ wrong. Spanish, French, Hindi, Italian and Portuguese fare better without being
 something this project claims. Set `lang` explicitly to read any voice in any
 language on purpose.
 
+### ffmpeg, for the OpenAI endpoint
+
+`POST /v1/audio/speech` defaults to `mp3`, which needs ffmpeg
+(`sudo apt install ffmpeg`). Without it the reply is a WAV carrying
+`X-Kokoro-Format-Fallback`, on the grounds that a client which gets playable
+audio it did not ask for is in better shape than one which gets a 400. `wav`
+and `pcm` never need it.
+
 ### `stream` and `stream_limit` — latency against phrasing
 
 Streaming sends each clause as soon as it exists, which is what makes speech
@@ -126,6 +136,23 @@ phrasing slightly, because the model sees clause boundaries where it would have
 chosen its own pauses. `stream_limit` is where the line falls: smaller starts
 sooner and phrases worse. Send `"stream": false` per request when you are
 generating a file rather than talking to someone.
+
+### `wyoming` — Home Assistant
+
+`wyoming = true` starts a second listener, on 10200 by default, speaking the
+protocol Home Assistant's voice pipeline uses. Add it under **Settings → Devices
+& Services → Add integration → Wyoming Protocol**. Every voice the service
+offers appears as a Home Assistant voice, tagged with the language it was
+trained to speak, so narrowing `voices` is worth doing here — a dropdown of 54
+is not a menu.
+
+Set `host = "0.0.0.0"` if Home Assistant runs on another machine. The Wyoming
+listener has no authentication of its own — the protocol has no notion of it —
+so it binds wherever `host` says and should stay on a network you trust.
+
+Where the HTTP side answers 429 when it is busy, Wyoming waits: Home Assistant
+has nowhere to put a "come back later", and a dropped announcement is worse than
+a late one.
 
 ### `api_key` — the difference between a speech service and an open one
 

@@ -32,7 +32,7 @@ jobs:
       - name: import every module
         run: |
           PYTHONPATH=src python -c "
-          from kokoro_pi import assets, config, graph, quantise, validate, server, build
+          from kokoro_pi import assets, config, graph, openai, quantise, validate, server, build, wyoming
           print('imports ok')"
       - name: the CLI explains itself
         run: PYTHONPATH=src python -m kokoro_pi --help
@@ -92,6 +92,85 @@ jobs:
         run: |
           PYTHONPATH=src python -m kokoro_pi config
           PYTHONPATH=src python -m kokoro_pi config --markdown | head -3
+
+      - name: the OpenAI translation layer behaves
+        run: |
+          PYTHONPATH=src python -c "
+          import io, math, struct, wave
+          from kokoro_pi import openai as oai
+
+          buffer = io.BytesIO()
+          with wave.open(buffer, 'wb') as out:
+              out.setnchannels(1); out.setsampwidth(2); out.setframerate(24000)
+              out.writeframes(b''.join(struct.pack('<h', int(12000 * math.sin(i * 0.08))) for i in range(24000)))
+          wav = buffer.getvalue()
+
+          # OpenAI's voice names, and a narrowed service that cannot honour one
+          assert oai.resolve_voice('nova', ['af_nova', 'af_heart'], 'af_heart') == 'af_nova'
+          assert oai.resolve_voice('bf_emma', ['bf_emma'], 'bf_emma') == 'bf_emma'
+          assert oai.resolve_voice('nova', ['af_heart'], 'af_heart') is None
+          assert oai.resolve_voice(None, ['af_heart'], 'af_heart') == 'af_heart'
+
+          # Wider range than this model has, so clamp and say so
+          assert oai.clamp_speed(4.0) == (2.0, True)
+          assert oai.clamp_speed(1.0) == (1.0, False)
+          assert oai.clamp_speed('quickly') == (1.0, True)
+
+          # wav passes through; pcm is the caller's job, never mislabelled here
+          assert oai.encode(wav, 'wav') == (wav, 'audio/wav', False)
+          assert oai.encode(wav, 'pcm') == (wav, 'audio/wav', False)
+
+          if oai.have_ffmpeg():
+              data, kind, fell_back = oai.encode(wav, 'mp3')
+              assert not fell_back and kind == 'audio/mpeg', (kind, fell_back)
+              assert data[:3] == b'ID3' or data[:2] in (b'\xff\xfb', b'\xff\xf3'), data[:4]
+              assert oai.encode(wav, 'flac')[0][:4] == b'fLaC'
+              print('openai layer ok, with ffmpeg')
+          else:
+              data, kind, fell_back = oai.encode(wav, 'mp3')
+              assert fell_back and kind == 'audio/wav' and data == wav
+              print('openai layer ok, ffmpeg absent so mp3 falls back as documented')"
+
+      - name: Wyoming events round-trip
+        run: |
+          PYTHONPATH=src python -c "
+          import io, json
+          from kokoro_pi import wyoming
+
+          # A header, then JSON data, then a payload -- the three-part framing
+          out = io.BytesIO()
+          wyoming.write_event(out, 'audio-chunk', {'rate': 24000, 'width': 2, 'channels': 1}, b'abcd')
+          wire = out.getvalue()
+          header, rest = wire.split(b'\n', 1)
+          assert json.loads(header)['payload_length'] == 4, header
+          assert rest == b'abcd', rest
+
+          kind, data = wyoming.read_event(io.BytesIO(wire))
+          assert kind == 'audio-chunk' and data['rate'] == 24000, (kind, data)
+
+          # data_length is merged over an inline data object
+          extra = json.dumps({'text': 'hello'}).encode()
+          framed = json.dumps({'type': 'synthesize', 'data': {'voice': {'name': 'af_heart'}},
+                               'data_length': len(extra)}).encode() + b'\n' + extra
+          kind, data = wyoming.read_event(io.BytesIO(framed))
+          assert kind == 'synthesize' and data['text'] == 'hello' and data['voice']['name'] == 'af_heart', data
+
+          assert wyoming.read_event(io.BytesIO(b'')) is None
+          assert wyoming.read_event(io.BytesIO(b'not json\n')) is None
+
+          class FakeEngine:
+              variant = 'int8'
+              def voices(self): return ['af_heart', 'bf_emma']
+              def language_for(self, name): return {'a': 'en-us', 'b': 'en-gb'}[name[0]]
+
+          engine = FakeEngine()
+          info = wyoming.info_event(engine, engine.language_for)
+          program = info['tts'][0]
+          assert program['supports_synthesize_streaming'] is True
+          assert [v['name'] for v in program['voices']] == ['af_heart', 'bf_emma']
+          assert program['voices'][1]['languages'] == ['en-gb'], program['voices'][1]
+          assert all(key in info for key in ('asr', 'tts', 'handle', 'intent', 'wake', 'mic', 'snd'))
+          print('wyoming ok')"
 
       - name: streaming split behaves
         run: |

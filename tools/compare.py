@@ -42,11 +42,21 @@ TEXTS = {
 
 
 def audio_seconds(data: bytes, assume_rate: int = 24000) -> float:
-    """Duration of a WAV, or of raw 16-bit mono at `assume_rate`."""
+    """Duration of a WAV, or of raw 16-bit mono at `assume_rate`.
+
+    A server that streams a WAV writes a placeholder length in the header --
+    Kokoro-FastAPI sends 0xFFFFFFFF -- so the declared frame count is checked
+    against how many bytes actually arrived. Believing the header reported
+    89,478 seconds of audio for a one-second phrase.
+    """
     if data[:4] == b"RIFF" and len(data) > 44:
         try:
             with wave.open(__import__("io").BytesIO(data)) as source:
-                return source.getnframes() / source.getframerate()
+                rate = source.getframerate()
+                width = source.getsampwidth() * source.getnchannels()
+                declared = source.getnframes()
+                possible = (len(data) - 44) // max(width, 1)
+                return min(declared, possible) / rate
         except wave.Error:
             pass
     if data[:3] == b"ID3" or data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
@@ -130,6 +140,9 @@ def main() -> None:
     parser.add_argument("--openai", action="append", default=[],
                         help="base URL of any OpenAI-compatible speech service; repeatable")
     parser.add_argument("--piper", help="command that runs piper, reading text on stdin")
+    parser.add_argument("--piper-http",
+                        help="base URL of a resident piper.http_server, which is the fair "
+                             "comparison: the CLI reloads its model on every call")
     parser.add_argument("--label", action="append", default=[],
                         help="rename an engine in the output, e.g. --label openai=Kokoro-FastAPI")
     parser.add_argument("--voice", default=None)
@@ -158,8 +171,14 @@ def main() -> None:
             {"model": "kokoro", "input": text, "response_format": "wav",
              **({"voice": args.voice} if args.voice else {})}, {})))
     if args.piper:
-        engines.append((labels.get("piper", "Piper"),
+        engines.append((labels.get("piper", "Piper (CLI, reloads per call)"),
                         lambda text, command=args.piper: piper_once(command, text)))
+    if args.piper_http:
+        base = args.piper_http.rstrip("/")
+        # piper.http_server answers POST /synthesize with a JSON body.
+        engines.append((labels.get("piper-http", "Piper (resident)"),
+                        lambda text, base=base: http_once(f"{base}/synthesize",
+                                                          {"text": text}, {})))
 
     if not engines:
         raise SystemExit("nothing to compare: pass --kokoro-pi, --openai or --piper")

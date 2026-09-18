@@ -379,12 +379,15 @@ native/           the two custom operators, plus vendored ONNX Runtime headers
 src/kokoro_pi/
   build.py            orchestrates: fetch, compile, rewrite, calibrate, verify
   config.py           the one option table: flags, environment, file, defaults
+  openai.py           the OpenAI speech API translated into this service's terms
+  wyoming.py          the Home Assistant protocol, framing and all
   graph.py            the four algebra-preserving graph rewrites
   quantise.py         calibration, weight folding, packing, graph surgery
   server.py           the resident service and clause streaming
   validate.py         spectral quality and speed measurement
 corpus/           nine calibration utterances and six disjoint held-out ones
-tools/            bench_http.py, for measuring any endpoint
+tools/            bench_http.py, compare.py, check_protocols.py
+docs/audio/       the MP3s the samples page plays
 docs/             configuration, how it works, quality methodology, benchmarks, roadmap
 ```
 
