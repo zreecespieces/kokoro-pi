@@ -159,6 +159,11 @@ the same size, and a calibration copy that is deleted afterwards. What remains i
 855 MB — 545 MB of models and a 305 MB virtual environment. Steady-state runtime is
 roughly 900 MB of RSS with the int8 model resident.
 
+**Do not build into `/tmp`.** On Raspberry Pi OS and Debian 12 and newer, `/tmp` is a
+tmpfs — a RAM disk — so `--models /tmp/anything` spends memory on every model it writes,
+about 900 MB of it, on top of what the build already needs. `df -h /tmp` says `tmpfs` if
+yours is one. The default, `~/.kokoro-pi/models`, is on real disk.
+
 It also needs about **2.6 GB of memory**, and that is the one that bites. Calibration is
 the peak: it holds the rewritten model, an instrumented copy of it, and an ONNX Runtime
 session over each. On a Pi 5 with other things already resident this is enough to be
