@@ -86,7 +86,8 @@ class Engine:
 
     def __init__(self, models: Path, variant: str | None = None, threads: int = 4,
                  voice: str | None = None, verify: bool = True,
-                 allowed: list[str] | None = None, lang: str = "auto", speed: float = 1.0):
+                 allowed: list[str] | None = None, lang: str = "auto", speed: float = 1.0,
+                 warm: bool = True):
         import onnxruntime as ort
         from kokoro_onnx import Kokoro
 
@@ -139,7 +140,10 @@ class Engine:
         if self.voice not in self._voices:
             raise SystemExit(f"default voice {self.voice!r} is not among the voices this service "
                              f"offers ({', '.join(self._voices)})")
-        self.synthesise("Ready.")  # warm the graph so the first real request is not the slow one
+        if warm:
+            # Warm the graph so the first real request is not the slow one. A
+            # library caller that only wants the object may not want to pay it.
+            self.synthesise("Ready.")
 
     def _pack_voices(self) -> list[str]:
         try:

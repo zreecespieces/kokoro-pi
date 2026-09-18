@@ -13,18 +13,18 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import time
 
 import numpy as np
 
-from . import assets, graph, quantise, validate
+from . import assets, graph, paths, quantise, validate
 
-ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM_MODEL = "kokoro-v1.0.fp16.onnx"
 FLOAT_MODEL = "kokoro-fused.onnx"
 INT8_MODEL = "kokoro-int8.onnx"
-LIBRARY = "libkokoro_pi_ops.so"
+LIBRARY = paths.LIBRARY
 PARITY_FLOOR_DB = 60.0
 
 
@@ -78,8 +78,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--models", type=Path, required=True, help="where models and the manifest go")
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--corpus", type=Path, default=ROOT / "corpus/english.json")
-    parser.add_argument("--heldout", type=Path, default=ROOT / "corpus/heldout.json")
+    parser.add_argument("--corpus", type=Path, default=None,
+                        help="calibration texts; defaults to the packaged corpus/english.json")
+    parser.add_argument("--heldout", type=Path, default=None,
+                        help="texts the calibration never sees; defaults to corpus/heldout.json")
     parser.add_argument("--families", nargs="*", default=None,
                         help="resblock families to quantise; default is every eligible convolution")
     parser.add_argument("--skip-int8", action="store_true", help="build only the float model")
@@ -94,13 +96,20 @@ def main(argv: list[str] | None = None) -> None:
                         "voice": args.voice, "threads": args.threads}
 
     at = stage("1/5 upstream assets")
-    paths = assets.fetch_all(models)
-    voices = paths["voices-v1.0.bin"]
+    downloaded = assets.fetch_all(models)
+    voices = downloaded["voices-v1.0.bin"]
     print(f"  done in {time.perf_counter() - at:.1f}s")
 
     at = stage("2/5 native operators")
     library = models / LIBRARY
-    subprocess.run(["bash", str(ROOT / "native/build.sh"), str(library)], check=True)
+    prebuilt = paths.prebuilt_library()
+    if prebuilt:
+        # A binary wheel carried one, compiled for this architecture in a
+        # manylinux container. Nothing to do, and no compiler needed.
+        shutil.copyfile(prebuilt, library)
+        print(f"  using the operators this install shipped with ({prebuilt})")
+    else:
+        subprocess.run(["bash", str(paths.resource("native/build.sh")), str(library)], check=True)
     provenance["library"] = LIBRARY
     print(f"  done in {time.perf_counter() - at:.1f}s")
 
@@ -112,8 +121,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  {json.dumps(counts)}")
     print(f"  done in {time.perf_counter() - at:.1f}s")
 
-    corpus_texts = [entry["text"] for entry in json.loads(args.corpus.read_text())["fixtures"]]
-    heldout = json.loads(args.heldout.read_text())["fixtures"]
+    corpus_path = args.corpus or paths.resource("corpus/english.json")
+    heldout_path = args.heldout or paths.resource("corpus/heldout.json")
+    corpus_texts = [entry["text"] for entry in json.loads(corpus_path.read_text())["fixtures"]]
+    heldout = json.loads(heldout_path.read_text())["fixtures"]
 
     at = stage("4/5 float parity check")
     upstream_session = session_for(models / UPSTREAM_MODEL, None, args.threads)

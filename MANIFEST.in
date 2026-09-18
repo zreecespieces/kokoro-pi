@@ -1,0 +1,10 @@
+# The sdist must be able to build the kernel, so it carries the sources the
+# wheel compiles and the corpora the build calibrates and checks against.
+graft native
+graft corpus
+include LICENSE NOTICE CHANGELOG.md Makefile install.sh
+recursive-include systemd *.service
+recursive-include tools *.py
+prune docs/audio
+prune samples
+prune .github

@@ -22,6 +22,8 @@ import wave
 
 import numpy as np
 
+from . import paths
+
 RATE = 24000
 
 
@@ -162,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--out", type=Path, help="write the full report as JSON")
     args = parser.parse_args(argv)
 
-    corpus = args.corpus or Path(__file__).resolve().parents[2] / "corpus/heldout.json"
+    corpus = args.corpus or paths.resource("corpus/heldout.json")
     report = run(args.models, corpus, args.variants, args.repeats, args.reference,
                  args.audio_dir, args.threads)
     print("\n=== summary")

@@ -4,6 +4,35 @@ Dates are when the work landed on `main`. Versions follow
 [semantic versioning](https://semver.org): the HTTP API and the config file keys
 are the public surface.
 
+## 1.2.0 — 2026-09-18
+
+Installable from PyPI, and usable as a library in place of kokoro-onnx.
+
+### Added
+
+- **`pip install kokoro-pi`.** Binary wheels for `manylinux_2_28` on aarch64 and
+  x86_64 carry a **pre-compiled kernel**, so nothing needs a compiler; anywhere
+  else pip falls back to the source distribution and `kokoro-pi build` compiles
+  the operators there. The wheel is tagged `py3-none`, not per-Python, because
+  the library is loaded by ONNX Runtime rather than imported by CPython.
+  Published by GitHub Actions through PyPI trusted publishing — no API token
+  exists to leak.
+- **`from kokoro_pi import Kokoro`** — kokoro-onnx's API over these kernels.
+  `create`, `create_stream` and `get_voices` take the same arguments and return
+  the same things, delegated to kokoro-onnx itself so nothing about
+  phonemisation or voices is reimplemented. The constructor takes a models
+  *directory* rather than model files, because these models are derived rather
+  than downloaded.
+- `kokoro_pi.paths`, which finds `native/` and `corpus/` whether the package was
+  cloned or installed, and reports a pre-compiled kernel when a wheel shipped one.
+
+### Changed
+
+- `--corpus` and `--heldout` default to the packaged corpora rather than to
+  paths relative to a repository that may not exist.
+- `Engine(..., warm=False)` skips the warm-up synthesis, for library callers who
+  only want the object.
+
 ## 1.1.0 — 2026-09-18
 
 Speaks other people's protocols, and can be configured without editing a

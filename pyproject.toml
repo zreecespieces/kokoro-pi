@@ -1,20 +1,28 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kokoro-pi"
-version = "1.1.0"
+version = "1.2.0"
 description = "Fast streaming Kokoro text to speech for Raspberry Pi, on the CPU"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "Zachary Reece" }]
-keywords = ["tts", "text-to-speech", "kokoro", "raspberry-pi", "onnx", "arm64", "neon"]
+keywords = ["tts", "text-to-speech", "kokoro", "raspberry-pi", "onnx", "arm64", "neon",
+            "speech-synthesis", "home-assistant", "wyoming", "openai", "self-hosted"]
 classifiers = [
-  "License :: OSI Approved :: MIT License",
+  "Development Status :: 5 - Production/Stable",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Operating System :: POSIX :: Linux",
+  "Intended Audience :: Developers",
 ]
 dependencies = [
   "onnxruntime==1.30.0",
@@ -30,7 +38,20 @@ kokoro-pi = "kokoro_pi.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/zreecespieces/kokoro-pi"
+"Hear it" = "https://zreecespieces.github.io/kokoro-pi/"
+Changelog = "https://github.com/zreecespieces/kokoro-pi/blob/main/CHANGELOG.md"
 Issues = "https://github.com/zreecespieces/kokoro-pi/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# native/ and corpus/ are copied in by setup.py's build_py, so they are listed
+# here as package data rather than as a package -- they are not Python.
+[tool.setuptools.package-data]
+kokoro_pi = [
+  "_bundled/*.so",
+  "_bundled/native/*",
+  "_bundled/native/include/*",
+  "_bundled/native/include/**/*",
+  "_bundled/corpus/*.json",
+]

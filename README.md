@@ -8,6 +8,7 @@
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-Raspberry%20Pi%205%20%C2%B7%20ARM64-c51a4a.svg)](#requirements)
+[![PyPI](https://img.shields.io/pypi/v/kokoro-pi.svg?color=3775a9)](https://pypi.org/project/kokoro-pi/)
 [![python](https://img.shields.io/badge/python-3.11%2B-3776ab.svg)](pyproject.toml)
 [![accelerator](https://img.shields.io/badge/accelerator-not%20required-success.svg)](#does-it-need-a-hailo-or-other-accelerator)
 [![OpenAI API](https://img.shields.io/badge/OpenAI%20speech%20API-compatible-412991.svg)](#openai-compatible)
@@ -68,6 +69,27 @@ curl -sS -N -X POST http://127.0.0.1:8080/v1/tts \
 # or save a file
 curl -s "http://127.0.0.1:8080/v1/tts?text=Hello&format=wav" -o hello.wav
 ```
+
+<details>
+<summary><b>From pip, into your own environment</b></summary>
+
+```bash
+pip install kokoro-pi
+kokoro-pi build          # 177 MB download, then a few minutes of calibration
+kokoro-pi serve
+```
+
+Two commands rather than one, because the models are *derived* rather than
+redistributed — the build downloads the upstream export, rewrites the graph,
+calibrates the int8 convolutions and checks the result against the original.
+
+On a 64-bit ARM or x86 Linux machine, `pip install` brings a **pre-compiled kernel**
+built in a manylinux container, so nothing needs a compiler. Anywhere else pip falls
+back to the source distribution and `kokoro-pi build` compiles the operators itself,
+which needs `g++`.
+
+No systemd service from this path — `install.sh` is what installs one.
+</details>
 
 <details>
 <summary><b>Prefer to do it by hand?</b></summary>
@@ -300,6 +322,34 @@ reply is a WAV, with a header saying so, on the grounds that playable audio you 
 ask for beats a 400. And **`speed` is clamped to 0.5–2.0**, Kokoro's sensible range,
 rather than OpenAI's 0.25–4.0.
 
+### As a library, in place of kokoro-onnx
+
+If you are already calling Kokoro from Python, two lines change and nothing else does:
+
+```diff
+-from kokoro_onnx import Kokoro
+-kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
++from kokoro_pi import Kokoro
++kokoro = Kokoro()
+
+ samples, rate = kokoro.create("Hello.", voice="af_heart")
+```
+
+`create`, `create_stream` and `get_voices` take the arguments they always took and
+return what they always returned — they are delegated to kokoro-onnx itself, running
+over the optimised graph with the native operators registered, so nothing about
+phonemisation or voice handling is reimplemented here and none of it can drift.
+
+The constructor is the part that cannot match, and the reason is worth knowing: these
+models are *derived*, not downloaded — an int8 build with per-channel scales folded into
+the weights, plus an operator library beside it. So it takes the directory holding the
+manifest `kokoro-pi build` wrote, and finds it the way the service does: the `models`
+setting from a config file, the environment, or `~/.kokoro-pi/models`.
+
+One behavioural difference on purpose: `lang` follows the voice unless you name one, so
+`bf_emma` gets British phonemes rather than American. Pass `lang="en-us"` for the old
+behaviour.
+
 ### Home Assistant
 
 The [Wyoming protocol](https://github.com/rhasspy/wyoming), which is how Home Assistant
@@ -402,7 +452,9 @@ native/           the two custom operators, plus vendored ONNX Runtime headers
 src/kokoro_pi/
   build.py            orchestrates: fetch, compile, rewrite, calibrate, verify
   config.py           the one option table: flags, environment, file, defaults
+  compat.py           kokoro-onnx's API, backed by these kernels
   openai.py           the OpenAI speech API translated into this service's terms
+  paths.py            finds native/ and corpus/ whether cloned or pip-installed
   wyoming.py          the Home Assistant protocol, framing and all
   graph.py            the four algebra-preserving graph rewrites
   quantise.py         calibration, weight folding, packing, graph surgery
@@ -412,6 +464,7 @@ corpus/           nine calibration utterances and six disjoint held-out ones
 tools/            bench_http.py, compare.py, check_protocols.py
 docs/audio/       the MP3s the samples page plays
 docs/             configuration, how it works, quality methodology, benchmarks, roadmap
+setup.py          bundles native/ and corpus/ into the package, compiles the kernel
 ```
 
 ## Troubleshooting

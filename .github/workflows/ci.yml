@@ -172,6 +172,30 @@ jobs:
           assert all(key in info for key in ('asr', 'tts', 'handle', 'intent', 'wake', 'mic', 'snd'))
           print('wyoming ok')"
 
+      - name: the package builds, installs and exposes its own files
+        run: |
+          pipx run build --wheel
+          python -m venv /tmp/wheelcheck
+          /tmp/wheelcheck/bin/pip install --quiet dist/*.whl
+          /tmp/wheelcheck/bin/kokoro-pi --help > /dev/null
+          /tmp/wheelcheck/bin/python -c "
+          import kokoro_pi
+          from kokoro_pi import paths
+          print('version', kokoro_pi.__version__)
+          # An installed package must find the build script and corpora it
+          # shipped with, not paths relative to a checkout that is not there.
+          assert paths.resource('corpus/english.json').exists()
+          assert paths.resource('native/build.sh').exists()
+          library = paths.prebuilt_library()
+          print('kernel in the wheel:', library)
+          assert library is not None and library.exists(), 'wheel has no operator library'
+          # Kokoro is lazily exported: importing the package must not drag in
+          # onnxruntime, but the name has to be reachable and discoverable.
+          import sys
+          assert 'onnxruntime' not in sys.modules, 'importing kokoro_pi loaded onnxruntime'
+          assert 'Kokoro' in dir(kokoro_pi)
+          print('packaging ok')"
+
       - name: streaming split behaves
         run: |
           PYTHONPATH=src python -c "

@@ -104,6 +104,29 @@ If audio plays but stutters, your client is probably buffering: pass `curl -N`, 
 Crackling at the very start of playback is usually the sound card waking up, not
 synthesis. Play a short silence first, or keep the device open.
 
+## `pip install` problems
+
+**`kokoro-pi: command not found` after installing** — the entry point went into the
+environment's `bin/`, which is not on your `PATH` unless the environment is active.
+`python -m kokoro_pi` always works, and `pipx install kokoro-pi` puts the command on
+your `PATH` on purpose.
+
+**`no models.json in ~/.kokoro-pi/models`** — `pip install` brings the code, not the
+models. They are derived rather than redistributed, so run `kokoro-pi build` once
+(a 177 MB download, then a few minutes of calibration).
+
+**It compiled the operators even though you installed a wheel** — that happens when pip
+fell back to the source distribution, which it does when no wheel matches your platform.
+Check what you got:
+
+```bash
+python -c "from kokoro_pi import paths; print(paths.prebuilt_library())"
+```
+
+`None` means a source install, and `kokoro-pi build` will compile the kernel itself —
+which needs `g++` and is fine, just slower to set up. Wheels are published for
+`manylinux_2_28` on aarch64 and x86_64.
+
 ## Builds fail to compile
 
 **`g++: command not found`** — `sudo apt install build-essential`.

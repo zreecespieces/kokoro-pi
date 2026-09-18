@@ -1,0 +1,103 @@
+name: publish
+
+# Releases go to PyPI through trusted publishing: GitHub proves who it is with an
+# OIDC token and PyPI mints a short-lived credential. There is no API token in
+# this repository's secrets, so there is none to leak.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Where to publish
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+jobs:
+  wheels:
+    name: wheel (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      # Built inside manylinux so the library links against an old enough glibc
+      # to install on Debian 12 and everything newer. Building on the runner
+      # itself would produce something Raspberry Pi OS bookworm cannot load.
+      - name: build the wheel in a manylinux container
+        run: |
+          docker run --rm -v "$PWD":/io -w /io -e KOKORO_PI_REQUIRE_NATIVE=1 ${{ matrix.image }} \
+            bash -c "/opt/python/cp311-cp311/bin/python -m pip install -q build auditwheel &&
+                     /opt/python/cp311-cp311/bin/python -m build --wheel --outdir /io/raw &&
+                     /opt/python/cp311-cp311/bin/python -m auditwheel repair /io/raw/*.whl -w /io/dist"
+
+      # A wheel tagged for a platform that does not contain the kernel is the one
+      # failure this must never ship, and it is invisible without looking.
+      - name: the wheel really carries the kernel
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile, sys
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          library = [n for n in names if n.endswith("libkokoro_pi_ops.so")]
+          assert library, f"{wheel} has no operator library:\n" + "\n".join(names)
+          assert "manylinux" in wheel, f"{wheel} is not a manylinux wheel"
+          print(f"{wheel}: {library[0]}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.arch }}
+          path: dist/*.whl
+
+  sdist:
+    name: sdist
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # No kernel in the source distribution: it is compiled on the machine that
+      # will run it, which is the whole point of the -march flags.
+      - run: pipx run build --sdist
+        env:
+          KOKORO_PI_NO_NATIVE: "1"
+      - name: the sdist can build its own kernel
+        run: |
+          tar tzf dist/*.tar.gz | grep -E "native/build.sh|native/quant_conv_op.cpp|corpus/english.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write          # the OIDC token trusted publishing exchanges
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist/
+      - name: publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: publish to PyPI
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi')
+        uses: pypa/gh-action-pypi-publish@release/v1
