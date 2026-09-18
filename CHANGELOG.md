@@ -28,10 +28,28 @@ Installable from PyPI, and usable as a library in place of kokoro-onnx.
 
 ### Changed
 
+- **Calibration reduces inside the graph.** Instrumentation used to mark each
+  target's input tensor as a graph output, so every pass copied out 36
+  activation tensors — 313 MB per utterance, measured. It now adds `Abs` and
+  `ReduceMax` and returns one vector per target: **0.5 MB**, with identical
+  ranges (worst difference 0.0).
 - `--corpus` and `--heldout` default to the packaged corpora rather than to
   paths relative to a repository that may not exist.
 - `Engine(..., warm=False)` skips the warm-up synthesis, for library callers who
   only want the object.
+
+### Fixed
+
+- **Builds were being killed by the kernel.** A full build peaked at 3.1 GB
+  because nothing was released between stages, and an out-of-memory kill is a
+  `SIGKILL` — no traceback, the log simply stops mid-stage. Every stage now
+  frees what it is finished with before the next allocates, the parity check
+  keeps its six reference waveforms instead of the session that made them, and
+  the build warns up front when `MemAvailable` is below what it needs. The
+  documented 2.5 GB was disk; the memory figure was written down nowhere.
+- Both ARM kernels now round identically (`std::fma` in the portable path,
+  matching `vfmaq_f32`), so a Pi 4 and a Pi 5 produce the same audio rather than
+  differing by the half-ULP this vocoder amplifies to its phase-chaos floor.
 
 ## 1.1.0 — 2026-09-18
 
