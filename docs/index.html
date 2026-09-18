@@ -135,6 +135,23 @@
   benchmarks</a>, including a comparison against Piper and Kokoro-FastAPI on the same
   machine.</p>
 
+  <h2>Against the alternatives</h2>
+  <table>
+    <thead><tr><th>Engine</th><th class="n">Phrase</th><th class="n">Sentence</th><th class="n">Paragraph</th></tr></thead>
+    <tbody>
+      <tr><td><b>kokoro-pi</b></td><td class="n"><b>0.49</b></td><td class="n"><b>0.48</b></td><td class="n"><b>0.37</b></td></tr>
+      <tr><td>Kokoro-FastAPI — the same model, PyTorch</td><td class="n">1.86</td><td class="n">1.38</td><td class="n">1.39</td></tr>
+      <tr><td>Piper, <code>en_US-lessac-medium</code></td><td class="n">0.12</td><td class="n">0.13</td><td class="n">0.14</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Realtime factor on one Raspberry Pi 5, every engine resident, measured
+  the same afternoon. <b>3.4–3.8× faster than the popular Kokoro server</b> — the
+  difference between not keeping up with speech and running at three times speech. And
+  <b>2.6–3× slower than Piper</b>, which is a smaller model doing a cheaper job and is
+  excellent at it. Both are now comfortably faster than speech, which is the point: on
+  this hardware the choice stops being about speed and starts being about how the voice
+  sounds. The players above are how you decide.</p>
+
   <h2>Running it</h2>
 <pre>curl -fsSL https://raw.githubusercontent.com/zreecespieces/kokoro-pi/main/install.sh | bash
 

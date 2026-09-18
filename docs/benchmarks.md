@@ -117,6 +117,60 @@ everything else 3.0%. Generator convolutions by group: `resblocks.5` 518.6 ms,
 `resblocks.4` 323.4, `resblocks.2` 323.0, `resblocks.1` 219.6, `resblocks.3` 161.1,
 `resblocks.0` 111.4, `ups.1` 92.9, `ups.0` 48.0 — 1815 ms, 64.3% of the run.
 
+## Against the alternatives
+
+Same Raspberry Pi 5, same afternoon, every engine resident and measured through
+its own HTTP API by [`tools/compare.py`](../tools/compare.py). Realtime factor
+is the comparison that means anything: the engines do not produce the same
+amount of audio for the same words, so their seconds are not comparable.
+
+| Engine | Phrase (1.4 s) | Sentence (5.5 s) | Paragraph (20 s) |
+|---|---:|---:|---:|
+| **kokoro-pi** (int8, this project) | **0.49** | **0.48** | **0.37** |
+| Kokoro-FastAPI (same model, PyTorch) | 1.86 | 1.38 | 1.39 |
+| Piper, `en_US-lessac-medium` | 0.12 | 0.13 | 0.14 |
+
+Two results, and they point in opposite directions.
+
+**Against [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) — the same
+model, served by the popular wrapper — this is 3.4–3.8× faster**, and that is
+the difference between a realtime factor of 1.39 and 0.37: between an engine
+that cannot keep up with speech on a Pi and one that runs at nearly three times
+speech. Its arm64 image works fine; it is PyTorch on four Cortex-A76 cores,
+which is what the "Kokoro on PyTorch" row above measures too. Full passage for
+the paragraph: 28.9 s against 7.7 s.
+
+**Against Piper, this is 2.6–3× slower, and that is not a close call.** Piper is
+a much smaller model doing a much cheaper job, and it is superb at it. If
+realtime factor is what you are optimising, Piper wins and nothing in this
+project will change that.
+
+What this project offers instead is that **Kokoro is usable at all on this
+hardware**. Both engines are comfortably faster than speech — 0.37 and 0.14 —
+so on a Pi 5 the choice is not about speed any more, it is about how the voice
+sounds, and Kokoro-82M is a considerably better-sounding model than a Piper
+medium voice. [Listen to
+both](https://zreecespieces.github.io/kokoro-pi/) and decide; that is the
+honest way to pick.
+
+Worth knowing while deciding: [Piper was archived in October
+2025](https://github.com/OHF-Voice/piper1-gpl) and takes no new voices or fixes,
+and this service speaks [the same Wyoming protocol](../README.md#home-assistant)
+Home Assistant uses to talk to it.
+
+Reproduce any of this:
+
+```bash
+python3 tools/compare.py --kokoro-pi http://127.0.0.1:8080 \
+  --openai http://127.0.0.1:8880 --label openai=Kokoro-FastAPI \
+  --piper-http http://127.0.0.1:5100 --label piper-http=Piper
+```
+
+These three were measured on a machine that was also running the author's
+assistant and two other resident services, so they are noisier than the tables
+above — run-to-run spread was up to 20%. The ranking was not close enough for
+that to matter.
+
 ## Threads
 
 One synthesis does not use four cores well:
