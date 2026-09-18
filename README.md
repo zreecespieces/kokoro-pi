@@ -57,7 +57,9 @@ model (177 MB, checksum verified), compiles the native operators **for your CPU*
 derives the optimised models, checks them against the upstream audio, and installs a
 user systemd service on port 8080.
 
-Budget 15–25 minutes on a Pi 5, most of it the download and the calibration pass. Then:
+Budget 15–25 minutes on a Pi 5, most of it the download and the calibration pass, and
+about 2.6 GB of free memory — calibration is the peak, and a Pi with much else resident
+will be killed by the kernel rather than finish. Then:
 
 ```bash
 # speak, straight to the speaker, starting on the first clause

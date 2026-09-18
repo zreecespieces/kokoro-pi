@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import gc
 import json
 from pathlib import Path
 import shutil
@@ -26,6 +27,40 @@ FLOAT_MODEL = "kokoro-fused.onnx"
 INT8_MODEL = "kokoro-int8.onnx"
 LIBRARY = paths.LIBRARY
 PARITY_FLOOR_DB = 60.0
+
+
+#: Measured peak resident size of a full build on a Pi 5, with a little headroom.
+#: Calibration is the peak: it holds the rewritten model, an instrumented copy of
+#: it, and a session over each.
+PEAK_MB = 2600
+
+
+def available_mb() -> int | None:
+    """What the kernel says it could give us, or None where that is not knowable."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def check_memory() -> None:
+    """Say so before the build starts, not after the kernel kills it.
+
+    An out-of-memory kill is a SIGKILL: no traceback, no message, the log simply
+    stops mid-stage. That is a miserable thing to debug from the other end of a
+    bug report, and it is entirely predictable beforehand.
+    """
+    free = available_mb()
+    if free is None or free >= PEAK_MB:
+        return
+    print(f"warning: about {free} MB of memory is available and this build peaks near "
+          f"{PEAK_MB} MB.\n"
+          f"         If it stops without printing an error, that was the kernel killing it.\n"
+          f"         Stop what else is running, or use --skip-int8 to build only the float "
+          f"model.", flush=True)
 
 
 def session_for(model: Path, library: Path | None, threads: int):
@@ -95,6 +130,8 @@ def main(argv: list[str] | None = None) -> None:
     provenance: dict = {"built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         "voice": args.voice, "threads": args.threads}
 
+    check_memory()
+
     at = stage("1/5 upstream assets")
     downloaded = assets.fetch_all(models)
     voices = downloaded["voices-v1.0.bin"]
@@ -117,6 +154,10 @@ def main(argv: list[str] | None = None) -> None:
     upstream = onnx.load(str(models / UPSTREAM_MODEL))
     fused, counts = graph.optimise(upstream)
     onnx.save(fused, str(models / FLOAT_MODEL))
+    # Two full models in memory, each 177 MB on disk and more once parsed. The
+    # rewrites are done with this one.
+    del upstream
+    gc.collect()
     provenance["rewrites"] = counts
     print(f"  {json.dumps(counts)}")
     print(f"  done in {time.perf_counter() - at:.1f}s")
@@ -131,8 +172,12 @@ def main(argv: list[str] | None = None) -> None:
     feeds = capture_inputs(upstream_session, voices, [entry["text"] for entry in heldout], args.voice)
     float_session = session_for(models / FLOAT_MODEL, library, args.threads)
     parity = []
+    # Held on to for stage 5, so neither of these sessions has to be: a few
+    # seconds of audio is megabytes where a session is hundreds of them.
+    references = []
     for entry, feed in zip(heldout, feeds):
         reference = audio_for(upstream_session, feed)
+        references.append(reference)
         candidate = audio_for(float_session, feed)
         measured = validate.metrics(reference, candidate)
         parity.append({"id": entry["id"], **measured})
@@ -143,6 +188,10 @@ def main(argv: list[str] | None = None) -> None:
                          "refusing to write the manifest")
     provenance["float_parity"] = {"worst_waveform_snr_db": worst, "per_utterance": parity}
     print(f"  worst {worst:.1f} dB - these rewrites are algebra-preserving, so this should be high")
+    # Calibration is about to load two more models, and the peak of this whole
+    # build is whatever is resident when it does. Both of these are finished.
+    del upstream_session, float_session
+    gc.collect()
     print(f"  done in {time.perf_counter() - at:.1f}s")
 
     variants = {
@@ -158,6 +207,8 @@ def main(argv: list[str] | None = None) -> None:
         instrumented = quantise.instrument(fused, targets)
         instrumented_path = models / "kokoro-calibration.onnx"
         onnx.save(instrumented, str(instrumented_path))
+        del instrumented
+        gc.collect()
         calibration_session = session_for(instrumented_path, library, args.threads)
         names = [o.name for o in calibration_session.get_outputs()]
         ranges: dict = {}
@@ -167,12 +218,15 @@ def main(argv: list[str] | None = None) -> None:
                 outputs = dict(zip(names, calibration_session.run(None, feed)))
                 quantise.accumulate_ranges(outputs, targets, ranges)
             print(f"  calibrated on {len(text)} characters")
-        del calibration_session
+        del calibration_session, calibration_feeds
+        gc.collect()
         instrumented_path.unlink()
         quantise.save_ranges(models / "calibration.npz", ranges)
 
         quantised, report = quantise.build(fused, targets, ranges)
         onnx.save(quantised, str(models / INT8_MODEL))
+        del quantised, fused
+        gc.collect()
         provenance["int8"] = {"corpus": str(args.corpus.name), "utterances": len(corpus_texts),
                               **quantise.summarise(report)}
         variants["int8"] = {"model": INT8_MODEL, "custom_ops": [LIBRARY], "backend": "int8-fused"}
@@ -180,8 +234,7 @@ def main(argv: list[str] | None = None) -> None:
 
         int8_session = session_for(models / INT8_MODEL, library, args.threads)
         held = []
-        for entry, feed in zip(heldout, feeds):
-            reference = audio_for(upstream_session, feed)
+        for entry, feed, reference in zip(heldout, feeds, references):
             candidate = audio_for(int8_session, feed)
             measured = validate.metrics(reference, candidate)
             held.append({"id": entry["id"], **measured})

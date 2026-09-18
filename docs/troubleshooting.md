@@ -154,10 +154,19 @@ int8 benefit. This project is aimed at ARM64.
 
 ## Memory and disk
 
-The build needs about 2.5 GB free: a 177 MB download, two derived models of about the
-same size, and a calibration copy that is deleted afterwards. What remains is about
+The build needs about 2.5 GB of **disk**: a 177 MB download, two derived models of about
+the same size, and a calibration copy that is deleted afterwards. What remains is about
 855 MB — 545 MB of models and a 305 MB virtual environment. Steady-state runtime is
 roughly 900 MB of RSS with the int8 model resident.
+
+It also needs about **2.6 GB of memory**, and that is the one that bites. Calibration is
+the peak: it holds the rewritten model, an instrumented copy of it, and an ONNX Runtime
+session over each. On a Pi 5 with other things already resident this is enough to be
+killed — and an out-of-memory kill is a `SIGKILL`, so there is no traceback and no error
+in the log. **A build that stops mid-stage with no message was almost certainly killed.**
+Confirm it with `dmesg -T | grep -i "killed process"`, then either stop what else is
+running or build the float model alone with `--skip-int8`. The build warns up front when
+it can see there is not enough.
 
 You can reclaim 177 MB by deleting `kokoro-v1.0.fp16.onnx` after the build, but then
 `--variant upstream` and any rebuild will re-download it.
