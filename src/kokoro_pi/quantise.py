@@ -127,8 +127,11 @@ def instrument(model: onnx.ModelProto, targets: list[dict]) -> onnx.ModelProto:
             node = helper.make_node("ReduceMax", [f"{peak}_abs"], [peak],
                                     name=peak, axes=axes, keepdims=0)
         instrumented.graph.node.append(node)
+        # Rank one, length unknown until the channel count is: a shape of None
+        # leaves the value info without a `shape` field at all, which ONNX
+        # Runtime tolerates and onnx.checker rejects.
         instrumented.graph.output.append(
-            helper.make_tensor_value_info(peak, TensorProto.FLOAT, None))
+            helper.make_tensor_value_info(peak, TensorProto.FLOAT, [None]))
     return instrumented
 
 

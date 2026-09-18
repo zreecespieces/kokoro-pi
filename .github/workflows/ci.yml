@@ -196,6 +196,66 @@ jobs:
           assert 'Kokoro' in dir(kokoro_pi)
           print('packaging ok')"
 
+      - name: calibration reduces over the right axes
+        run: |
+          cat > /tmp/instrument_check.py <<'PYEOF'
+          """Calibration instrumentation must reduce over the right axes.
+
+          The bug this exists for: the rank was taken from the weight initializer, which
+          the height-one rewrite leaves 3-D feeding a 2-D convolution through an
+          Unsqueeze. Reducing [0, 2] of a 4-D activation gives a "per-channel" peak of
+          length C x W, and the only thing that caught it was a comparison against the
+          old instrumentation on real audio.
+          """
+          import numpy as np
+          import onnx
+          from onnx import TensorProto, helper, numpy_helper
+
+          from kokoro_pi import quantise
+
+          # A convolution shaped like the ones in the rewritten generator: 4-D
+          # activations, a 3-D weight initializer reaching it through Unsqueeze.
+          weight = numpy_helper.from_array(np.zeros((8, 8, 3), np.float32), "conv.weight")
+          axes = numpy_helper.from_array(np.array([2], np.int64), "unsqueeze.axes")
+          graph = helper.make_graph(
+              [
+                  helper.make_node("Unsqueeze", ["conv.weight", "unsqueeze.axes"], ["w4"], name="/generator/unsq"),
+                  helper.make_node("Conv", ["x", "w4"], ["y"], name="/generator/resblocks.0/convs1.0/Conv",
+                                   dilations=[1, 1], pads=[0, 1, 0, 1], strides=[1, 1], group=1),
+              ],
+              "g",
+              [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 8, 1, 16])],
+              [helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 8, 1, 16])],
+              [weight, axes],
+          )
+          model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 20)])
+
+          targets = quantise.find_targets(model, None)
+          assert len(targets) == 1, targets
+          assert targets[0]["rank"] == 4, f"rank came from the weight again: {targets[0]['rank']}"
+
+          instrumented = quantise.instrument(model, targets)
+          peaks = [o.name for o in instrumented.graph.output if o.name.endswith(quantise.PEAK)]
+          assert len(peaks) == 1, [o.name for o in instrumented.graph.output]
+
+          reduce_nodes = [n for n in instrumented.graph.node if n.op_type == "ReduceMax"]
+          assert len(reduce_nodes) == 1, reduce_nodes
+          initializers = {i.name: numpy_helper.to_array(i) for i in instrumented.graph.initializer}
+          reduced = list(initializers[reduce_nodes[0].input[1]])
+          assert reduced == [0, 2, 3], f"reducing the wrong axes: {reduced}"
+          assert [a.i for a in reduce_nodes[0].attribute if a.name == "keepdims"] == [0]
+
+          # And the raw tensor must still be accepted, so an older graph keeps working.
+          raw = {"x": np.arange(8 * 4, dtype=np.float32).reshape(1, 8, 1, 4)}
+          targets[0]["input"] = "x"
+          ranges = quantise.accumulate_ranges(raw, targets, {})
+          assert ranges[targets[0]["node"]].shape == (8,), ranges[targets[0]["node"]].shape
+
+          onnx.checker.check_model(instrumented)
+          print("instrumentation ok: rank 4, reduces [0, 2, 3], model valid")
+          PYEOF
+          PYTHONPATH=src python /tmp/instrument_check.py
+
       - name: streaming split behaves
         run: |
           PYTHONPATH=src python -c "
