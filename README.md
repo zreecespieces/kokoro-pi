@@ -18,9 +18,12 @@ Same model, same voice, **~2× faster synthesis** and speech that **starts 6× s
 because the vocoder's convolutions run through a hand-written int8 ARM kernel and long
 text is streamed clause by clause.
 
+`pip install kokoro-pi` · a resident HTTP service · the OpenAI speech API · Home
+Assistant's Wyoming protocol · a drop-in for `kokoro-onnx`
+
 ### ▶ [Hear it](https://zreecespieces.github.io/kokoro-pi/) — the published export against this one, same Pi, same voice
 
-[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Roadmap](docs/roadmap.md) · [Quality](docs/quality.md) · [API](#http-api)
+[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Roadmap](docs/roadmap.md) · [Quality](docs/quality.md) · [API](#http-api) · [Library](#as-a-library-in-place-of-kokoro-onnx)
 
 </div>
 
@@ -48,21 +51,39 @@ is meant to be indistinguishable from what upstream Kokoro produces.
 
 ## Quickstart
 
+**A speech service on this machine**, with a systemd unit, on port 8080:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zreecespieces/kokoro-pi/main/install.sh | bash
 ```
 
-That creates a virtual environment under `~/.kokoro-pi`, downloads the upstream Kokoro
-model (177 MB, checksum verified), compiles the native operators **for your CPU**,
-derives the optimised models, checks them against the upstream audio, and installs a
-user systemd service on port 8080.
-
-Budget 15–25 minutes on a Pi 5, most of it the download and the calibration pass, and
-about 2.6 GB of free memory — calibration is the peak, and a Pi with much else resident
-will be killed by the kernel rather than finish. Then:
+**Or into your own environment**, if you would rather call it from your own code:
 
 ```bash
-# speak, straight to the speaker, starting on the first clause
+pip install kokoro-pi
+kokoro-pi build          # the slow part: a 177 MB download, then calibration
+kokoro-pi serve          # optional; the library works without it
+```
+
+Either way the models are **derived, not downloaded** — the build fetches the upstream
+export, rewrites the graph, calibrates the int8 convolutions and checks the result
+against the original audio before it writes a manifest. That is the second command, and
+why there is one.
+
+Budget 15–25 minutes on a Pi 5, about 2.6 GB of free memory and 2.5 GB of disk.
+Calibration is the peak; a Pi with much else resident gets killed by the kernel rather
+than finishing, and [the build says so up front](docs/troubleshooting.md#memory-and-disk).
+
+`pip install` brings a **pre-compiled kernel** on 64-bit ARM and x86 Linux, so nothing
+needs a compiler — the ARM wheel carries one build for baseline ARMv8 and one using the
+dot-product extension, and picks at import. Anywhere else pip falls back to the source
+distribution and `kokoro-pi build` compiles the operators itself, which needs `g++`.
+`install.sh` always compiles for the CPU it is running on.
+
+Then speak:
+
+```bash
+# straight to the speaker, starting on the first clause
 curl -sS -N -X POST http://127.0.0.1:8080/v1/tts \
   -H 'Content-Type: application/json' \
   -d '{"text":"Hello from my Raspberry Pi."}' \
@@ -72,26 +93,17 @@ curl -sS -N -X POST http://127.0.0.1:8080/v1/tts \
 curl -s "http://127.0.0.1:8080/v1/tts?text=Hello&format=wav" -o hello.wav
 ```
 
-<details>
-<summary><b>From pip, into your own environment</b></summary>
+or from Python, with no service at all:
 
-```bash
-pip install kokoro-pi
-kokoro-pi build          # 177 MB download, then a few minutes of calibration
-kokoro-pi serve
+```python
+from kokoro_pi import Kokoro
+
+kokoro = Kokoro()
+samples, rate = kokoro.create("Hello from my Raspberry Pi.", voice="af_heart")
 ```
 
-Two commands rather than one, because the models are *derived* rather than
-redistributed — the build downloads the upstream export, rewrites the graph,
-calibrates the int8 convolutions and checks the result against the original.
-
-On a 64-bit ARM or x86 Linux machine, `pip install` brings a **pre-compiled kernel**
-built in a manylinux container, so nothing needs a compiler. Anywhere else pip falls
-back to the source distribution and `kokoro-pi build` compiles the operators itself,
-which needs `g++`.
-
-No systemd service from this path — `install.sh` is what installs one.
-</details>
+That is [kokoro-onnx's API](#as-a-library-in-place-of-kokoro-onnx), so existing code
+changes two lines and keeps the rest.
 
 <details>
 <summary><b>Prefer to do it by hand?</b></summary>
