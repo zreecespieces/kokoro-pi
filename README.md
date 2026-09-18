@@ -8,12 +8,16 @@
 [![platform](https://img.shields.io/badge/platform-Raspberry%20Pi%205%20%C2%B7%20ARM64-c51a4a.svg)](#requirements)
 [![python](https://img.shields.io/badge/python-3.11%2B-3776ab.svg)](pyproject.toml)
 [![accelerator](https://img.shields.io/badge/accelerator-not%20required-success.svg)](#does-it-need-a-hailo-or-other-accelerator)
+[![OpenAI API](https://img.shields.io/badge/OpenAI%20speech%20API-compatible-412991.svg)](#openai-compatible)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Wyoming-41bdf5.svg)](#home-assistant)
 
 Same model, same voice, **~2× faster synthesis** and speech that **starts 6× sooner** —
 because the vocoder's convolutions run through a hand-written int8 ARM kernel and long
 text is streamed clause by clause.
 
-[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Roadmap](docs/roadmap.md) · [Quality](docs/quality.md) · [Samples](samples) · [API](#http-api)
+### ▶ [Hear it](https://zreecespieces.github.io/kokoro-pi/) — the published export against this one, same Pi, same voice
+
+[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Roadmap](docs/roadmap.md) · [Quality](docs/quality.md) · [API](#http-api)
 
 </div>
 
@@ -238,6 +242,64 @@ Two settings matter when fitting this to an existing client: `default_format = "
 makes big-endian the default for clients that do not send a `format`, and `wait_seconds
 = 0` fails fast for clients that queue themselves. Both, and everything else, can come
 from a flag, the environment or a config file — [configuration](docs/configuration.md).
+
+## Use it with what you already run
+
+Two protocols besides this project's own, because the point of a speech service is that
+the thing that needs speech can reach it.
+
+### OpenAI compatible
+
+`POST /v1/audio/speech`, the endpoint Open WebUI, LibreChat, SillyTavern and the OpenAI
+SDKs already speak. Point them at this service and change nothing else:
+
+```bash
+curl http://127.0.0.1:8080/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"tts-1","input":"It just works.","voice":"nova","response_format":"mp3"}' \
+  -o hello.mp3
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="unused")
+client.audio.speech.create(model="tts-1", voice="nova", input="It just works.") \
+      .stream_to_file("hello.mp3")
+```
+
+OpenAI's six voice names map onto Kokoro's (`nova` → `af_nova`, `fable` → `bm_fable`,
+and so on), or pass a Kokoro name directly. `GET /v1/models` answers, because some
+clients ask before they will show you a voice list.
+
+Two honest caveats. **`mp3`, `opus`, `aac` and `flac` need ffmpeg** — without it the
+reply is a WAV, with a header saying so, on the grounds that playable audio you did not
+ask for beats a 400. And **`speed` is clamped to 0.5–2.0**, Kokoro's sensible range,
+rather than OpenAI's 0.25–4.0.
+
+### Home Assistant
+
+The [Wyoming protocol](https://github.com/rhasspy/wyoming), which is how Home Assistant
+talks to a voice service. Turn it on:
+
+```toml
+# ~/.config/kokoro-pi/config.toml
+wyoming = true          # listens on 10200, the port the integration offers by default
+host = "0.0.0.0"        # so Home Assistant on another machine can reach it
+```
+
+Then **Settings → Devices & Services → Add integration → Wyoming Protocol**, and give it
+this machine's address and port 10200. Every voice this service offers appears as a
+Home Assistant voice, tagged with the language it was trained to speak.
+
+It advertises `supports_synthesize_streaming`, so a sentence arriving a chunk at a time
+from a conversation agent starts playing as soon as its first clause exists rather than
+after the whole reply — which is the case clause streaming was written for.
+
+This matters now because [Piper was archived in October
+2025](https://github.com/OHF-Voice/piper1-gpl): it still works, but it is frozen, and
+Kokoro is a considerably better-sounding model. See the [benchmarks](docs/benchmarks.md)
+for what each costs on the same Pi.
 
 ## Choosing a variant
 

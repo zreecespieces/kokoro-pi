@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kokoro-pi — hear it</title>
+<meta name="description" content="Audio from Kokoro text to speech on a Raspberry Pi 5: the published export against the optimised int8 build. Same model, same voice, twice the speed.">
+<meta property="og:title" content="kokoro-pi — hear it">
+<meta property="og:description" content="The published Kokoro export against a fused int8 ARM kernel, on the same Raspberry Pi. Listen for the difference.">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6a6a66; --line: #e2e2dd;
+    --accent: #b4491f; --card: #ffffff; --code: #f4f4f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a; --fg: #e9e9e6; --muted: #9a9a95; --line: #2c2c31;
+      --accent: #ef8a5e; --card: #1e1e22; --code: #232328;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171a; --fg: #e9e9e6; --muted: #9a9a95; --line: #2c2c31;
+    --accent: #ef8a5e; --card: #1e1e22; --code: #232328;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 17px/1.65 ui-serif, Georgia, "Times New Roman", serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 45rem; margin: 0 auto; padding: 4rem 16px 6rem; }
+  h1 { font-size: 2.3rem; line-height: 1.1; margin: 0 0 .4rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.3rem; margin: 3rem 0 .5rem; letter-spacing: -.01em; }
+  .lede { font-size: 1.15rem; color: var(--muted); margin: 0 0 2rem; }
+  a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; }
+  pre {
+    background: var(--code); padding: 1rem; border-radius: 8px; overflow-x: auto;
+    border: 1px solid var(--line);
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1.1rem 1.2rem; margin: 1rem 0;
+  }
+  .said { font-size: 1.05rem; margin: 0 0 .9rem; }
+  .said::before { content: "“"; color: var(--muted); }
+  .said::after { content: "”"; color: var(--muted); }
+  .row {
+    display: grid; grid-template-columns: 8.5rem 1fr; gap: .6rem 1rem;
+    align-items: center; margin: .55rem 0;
+  }
+  .row .name { font-size: .95rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row .name b { color: var(--fg); font-weight: 600; }
+  audio { width: 100%; height: 36px; }
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; margin: 1rem 0; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: .95rem; }
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
+  @media (max-width: 34rem) {
+    .wrap { padding-top: 2.5rem; }
+    h1 { font-size: 1.8rem; }
+    .row { grid-template-columns: 1fr; gap: .25rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>kokoro-pi</h1>
+  <p class="lede">Kokoro text to speech on a Raspberry Pi 5, about twice as fast on the
+  same CPU. The point of the exercise is that you cannot hear the difference — so here
+  it is to listen to.</p>
+
+  <p><a href="https://github.com/zreecespieces/kokoro-pi">github.com/zreecespieces/kokoro-pi</a></p>
+
+  <h2>Same text, same voice, three builds</h2>
+  <p class="note">All produced on one Raspberry Pi 5 with the voice <code>af_heart</code>,
+  on held-out text the int8 calibration never saw. <b>Upstream</b> is the published Kokoro
+  ONNX export. <b>Float</b> adds graph rewrites and a native Snake kernel — 1.35×, and
+  identical to 115 dB. <b>int8</b> adds the fused convolution kernel and is the default
+  build: 1.83× on the vocoder, and what you are listening for is whether it costs
+  anything.</p>
+
+  <div class="card">
+    <p class="said">Good evening, Maya.</p>
+    <div class="row"><span class="name">upstream</span><audio controls preload="none" src="audio/short-1-upstream.mp3"></audio></div>
+    <div class="row"><span class="name">float</span><audio controls preload="none" src="audio/short-1-float.mp3"></audio></div>
+    <div class="row"><span class="name"><b>int8</b> — default</span><audio controls preload="none" src="audio/short-1-int8.mp3"></audio></div>
+  </div>
+
+  <div class="card">
+    <p class="said">On Tuesday, the museum opens at nine and closes shortly after sunset.</p>
+    <div class="row"><span class="name">upstream</span><audio controls preload="none" src="audio/medium-1-upstream.mp3"></audio></div>
+    <div class="row"><span class="name">float</span><audio controls preload="none" src="audio/medium-1-float.mp3"></audio></div>
+    <div class="row"><span class="name"><b>int8</b> — default</span><audio controls preload="none" src="audio/medium-1-int8.mp3"></audio></div>
+  </div>
+
+  <div class="card">
+    <p class="said">When the afternoon meeting ended, Elena reviewed every note, corrected
+    the final schedule, and sent a clear summary to the volunteers who would arrive early
+    the following morning.</p>
+    <div class="row"><span class="name">upstream</span><audio controls preload="none" src="audio/long-2-upstream.mp3"></audio></div>
+    <div class="row"><span class="name">float</span><audio controls preload="none" src="audio/long-2-float.mp3"></audio></div>
+    <div class="row"><span class="name"><b>int8</b> — default</span><audio controls preload="none" src="audio/long-2-int8.mp3"></audio></div>
+  </div>
+
+  <p class="note">These are 64 kbit MP3s so the page loads on a phone; the originals are
+  24 kHz WAVs in
+  <a href="https://github.com/zreecespieces/kokoro-pi/tree/main/samples">samples/</a>.
+  In a blind listen over all six held-out utterances, none of the builds was
+  distinguishable from the float engine, which is why the default is the fastest one.
+  The measured gap is 2.2 dB log-spectral distance against a floor of roughly 1 dB for
+  <em>any</em> change at all —
+  <a href="https://github.com/zreecespieces/kokoro-pi/blob/main/docs/quality.md">why that is
+  the right measure</a>.</p>
+
+  <h2>What it costs in time</h2>
+  <table>
+    <thead><tr><th>Setup</th><th class="n">First audio</th><th class="n">Full passage</th><th class="n">Realtime factor</th></tr></thead>
+    <tbody>
+      <tr><td>Kokoro on PyTorch — a plain <code>pip install</code></td><td class="n">10.45 s</td><td class="n">20.13 s</td><td class="n">1.54</td></tr>
+      <tr><td>Kokoro + ONNX Runtime, upstream export</td><td class="n">12.02 s</td><td class="n">12.02 s</td><td class="n">0.98</td></tr>
+      <tr><td>+ graph rewrites and the Snake kernel</td><td class="n">10.41 s</td><td class="n">10.41 s</td><td class="n">0.85</td></tr>
+      <tr><td>+ the fused int8 kernel</td><td class="n">5.47 s</td><td class="n">5.47 s</td><td class="n">0.45</td></tr>
+      <tr><td><b>+ clause streaming — the default</b></td><td class="n"><b>1.59 s</b></td><td class="n">5.90 s</td><td class="n">0.51</td></tr>
+    </tbody>
+  </table>
+  <p class="note">One paragraph, about 12 seconds of speech, measured over HTTP so the
+  numbers include everything a client waits for. Realtime factor under 1.0 is faster than
+  speech.
+  <a href="https://github.com/zreecespieces/kokoro-pi/blob/main/docs/benchmarks.md">Full
+  benchmarks</a>, including a comparison against Piper and Kokoro-FastAPI on the same
+  machine.</p>
+
+  <h2>Running it</h2>
+<pre>curl -fsSL https://raw.githubusercontent.com/zreecespieces/kokoro-pi/main/install.sh | bash
+
+curl -s http://127.0.0.1:8080/v1/tts -H 'Content-Type: application/json' \
+  -d '{"text":"Hello from my Raspberry Pi."}' | aplay -q -r 24000 -f S16_LE -c 1 -</pre>
+  <p class="note">It speaks the OpenAI speech API and the Wyoming protocol as well, so
+  Open WebUI and Home Assistant need a URL and nothing else.</p>
+
+  <footer>
+    Kokoro-82M is by <a href="https://huggingface.co/hexgrad/Kokoro-82M">hexgrad</a>,
+    Apache 2.0. The ONNX export is
+    <a href="https://github.com/thewh1teagle/kokoro-onnx">kokoro-onnx</a>. This project is
+    MIT and redistributes no model weights — they are downloaded and verified at install
+    time.
+  </footer>
+
+</div>
+</body>
+</html>

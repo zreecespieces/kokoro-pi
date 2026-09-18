@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 from . import config as cfg
+from . import openai as oai
 
 RATE = 24000
 FORMATS = set(cfg.FORMATS)
@@ -201,6 +202,16 @@ def build_handler(engine: Engine, settings):
             self.reply(401, {"error": "missing or wrong API key"})
             self.close_connection = True
 
+        def busy(self):
+            payload = json.dumps({"error": "busy synthesising; retry shortly"}).encode()
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.cors()
+            self.send_header("Retry-After", "1")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def reply(self, status: int, value: dict):
             payload = json.dumps(value).encode()
             self.send_response(status)
@@ -237,6 +248,8 @@ def build_handler(engine: Engine, settings):
                                  "lang": engine.lang, "threads": engine.threads,
                                  "format": default_format, "stream": settings.stream,
                                  "wait_seconds": wait_seconds, "busy": engine.lock.locked()})
+            elif route.path == "/v1/models":
+                self.reply(200, oai.models(engine.variant))
             elif route.path == "/v1/voices":
                 self.reply(200, {"voices": engine.voices(), "default": engine.voice,
                                  "languages": {name: engine.language_for(name) for name in engine.voices()}})
@@ -247,7 +260,8 @@ def build_handler(engine: Engine, settings):
                 self.reply(404, {"error": "not found"})
 
         def do_POST(self):
-            if urlparse(self.path).path != "/v1/tts":
+            route = urlparse(self.path).path
+            if route not in ("/v1/tts", "/v1/audio/speech"):
                 self.reply(404, {"error": "not found"})
                 return
             if not self.authorised():
@@ -264,7 +278,71 @@ def build_handler(engine: Engine, settings):
                 self.reply(400, {"error": "expected a JSON object with a 'text' field"})
                 self.close_connection = True
                 return
-            self.speak(body)
+            if route == "/v1/audio/speech":
+                self.speak_openai(body)
+            else:
+                self.speak(body)
+
+        def speak_openai(self, request: dict):
+            """OpenAI's shape, translated into ours. See openai.py for the two bends."""
+            text = request.get("input")
+            if not isinstance(text, str) or not text.strip():
+                self.reply(400, {"error": {"message": "input is required", "type": "invalid_request_error"}})
+                return
+            if len(text) > max_chars:
+                self.reply(413, {"error": {"message": f"input longer than {max_chars} characters",
+                                           "type": "invalid_request_error"}})
+                return
+            fmt = str(request.get("response_format", "mp3")).lower()
+            if fmt not in oai.FORMATS:
+                self.reply(400, {"error": {"message": f"response_format must be one of {sorted(oai.FORMATS)}",
+                                           "type": "invalid_request_error"}})
+                return
+            voice = oai.resolve_voice(request.get("voice"), engine.voices(), engine.voice)
+            if voice is None:
+                self.reply(400, {"error": {"message": f"unknown voice {request.get('voice')!r}; "
+                                                      f"see GET /v1/voices",
+                                           "type": "invalid_request_error"}})
+                return
+            speed, clamped = oai.clamp_speed(request.get("speed", engine.speed))
+
+            acquired = (engine.lock.acquire(blocking=False) if wait_seconds <= 0
+                        else engine.lock.acquire(timeout=wait_seconds))
+            if not acquired:
+                self.busy()
+                return
+            try:
+                # Buffered, not streamed: the OpenAI clients that matter read a
+                # whole body, and a compressed format cannot be produced
+                # incrementally anyway.
+                pieces = split_for_streaming(text, settings.stream_limit)
+                audio = np.concatenate([engine.synthesise(piece, voice, speed) for piece in pieces])
+                if fmt == "pcm":
+                    # OpenAI's `pcm` is 24 kHz signed 16-bit little-endian mono,
+                    # which is exactly what this model produces.
+                    payload, content_type, fell_back = to_bytes(audio, "s16le"), "audio/pcm", False
+                else:
+                    payload, content_type, fell_back = oai.encode(wav_bytes(audio), fmt)
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.cors()
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("X-Kokoro-Backend", engine.backend)
+                self.send_header("X-Kokoro-Voice", voice)
+                if fell_back:
+                    self.send_header("X-Kokoro-Format-Fallback",
+                                     f"{fmt} needs ffmpeg, which is not installed; sent wav")
+                if clamped:
+                    self.send_header("X-Kokoro-Speed-Clamped", f"{speed}")
+                self.end_headers()
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionError, TimeoutError):
+                self.close_connection = True
+            except Exception as error:
+                self.reply(500, {"error": {"message": f"synthesis failed: {type(error).__name__}",
+                                           "type": "server_error"}})
+            finally:
+                engine.lock.release()
 
         def speak(self, request: dict):
             text = request.get("text")
@@ -301,14 +379,7 @@ def build_handler(engine: Engine, settings):
             acquired = (engine.lock.acquire(blocking=False) if wait_seconds <= 0
                         else engine.lock.acquire(timeout=wait_seconds))
             if not acquired:
-                payload = json.dumps({"error": "busy synthesising; retry shortly"}).encode()
-                self.send_response(429)
-                self.send_header("Content-Type", "application/json")
-                self.cors()
-                self.send_header("Retry-After", "1")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+                self.busy()
                 return
             started = time.perf_counter()
             committed = False
@@ -396,6 +467,13 @@ def main(argv: list[str] | None = None) -> None:
                     verify=settings.verify, allowed=settings.voices, lang=settings.lang,
                     speed=settings.speed)
     handler = build_handler(engine, settings)
+    if settings.wyoming:
+        from . import wyoming
+
+        wyoming.serve(engine, settings, split_for_streaming, settings.host, settings.wyoming_port)
+        print(f"wyoming listening on {settings.host}:{settings.wyoming_port} "
+              f"-- add it in Home Assistant with Settings > Devices > Add integration > Wyoming",
+              flush=True)
     print(f"kokoro-pi ready: variant={engine.variant} backend={engine.backend} "
           f"voice={engine.voice} voices={len(engine.voices())} lang={settings.lang} "
           f"threads={engine.threads} format={settings.default_format} "

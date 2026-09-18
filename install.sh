@@ -40,6 +40,7 @@ esac
 if [ "$(uname -s)" = "Linux" ] && ! grep -qi asimddp /proc/cpuinfo; then
   warn "this CPU does not report the dot-product extension (asimddp); expect no int8 speedup."
 fi
+command -v ffmpeg >/dev/null || warn "no ffmpeg: the OpenAI endpoint will answer mp3/opus/aac/flac requests with a WAV instead. \`sudo apt install ffmpeg\` if you need those."
 command -v git >/dev/null || die "git is required"
 command -v g++ >/dev/null || die "g++ is required (sudo apt install build-essential)"
 PYTHON=${PYTHON:-python3}
