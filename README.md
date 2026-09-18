@@ -1,5 +1,11 @@
 <div align="center">
 
+<a href="https://zreecespieces.github.io/kokoro-pi/">
+  <img src="https://raw.githubusercontent.com/zreecespieces/kokoro-pi/main/docs/banner.png"
+       alt="kokoro-pi — Kokoro text to speech on a Raspberry Pi, twice as fast, on the CPU. First audio 1.59 s, down from 10.45 s. Realtime factor 0.45, down from 1.54. The int8 convolution kernel runs at 451 GOP/s, 4.4x ONNX Runtime's float kernel."
+       width="840">
+</a>
+
 # kokoro-pi
 
 **Fast, streaming Kokoro text-to-speech for the Raspberry Pi — on the CPU.**
