@@ -70,28 +70,79 @@ def find_targets(model: onnx.ModelProto, families: list[str] | None = None) -> l
                         "output": node.output[0], "weight": name,
                         "bias": node.input[2] if len(node.input) > 2 else None,
                         "shape": [out_channels, in_channels, kernel],
+                        # The activation's rank, which instrumentation needs to
+                        # name the axes it reduces over. Taken from the
+                        # convolution's own spatial rank rather than from the
+                        # weight: the height-one rewrite leaves a 3-D weight
+                        # initializer feeding a 2-D convolution through an
+                        # Unsqueeze, so the weight says 3 where the activation
+                        # is 4, and reducing the wrong axes yields a per-channel
+                        # peak that is not per channel.
+                        "rank": len(dilations) + 2,
                         "dilation": int(dilation), "pad": int(pad)})
     return targets
 
 
+#: Suffix for the per-channel peak this adds to the graph.
+PEAK = "__kokoro_peak"
+
+
 def instrument(model: onnx.ModelProto, targets: list[dict]) -> onnx.ModelProto:
-    """Expose each target's input tensor so calibration can watch it."""
+    """Add a per-input-channel peak for every target, and output *that*.
+
+    The obvious instrumentation -- mark each target's input tensor as a graph
+    output -- makes ONNX Runtime materialise and copy out 36 activation tensors
+    per pass. At 128 channels and 24,001 samples that is 12 MB each, about
+    430 MB in one dictionary, and it is the reason a build gets killed on a Pi
+    with anything else running.
+
+    All calibration wants is `abs(x).max()` over every axis but the channel, so
+    the reduction happens in the graph and what comes back is a vector per
+    target: kilobytes instead of hundreds of megabytes, and identical numbers.
+    """
     instrumented = onnx.ModelProto()
     instrumented.CopyFrom(model)
     existing = {o.name for o in instrumented.graph.output}
+    # Reductions moved `axes` from an attribute to an input in opset 18, and this
+    # model is newer than that.
+    reduce_takes_axes_input = any(
+        entry.domain in ("", "ai.onnx") and entry.version >= 18
+        for entry in instrumented.opset_import)
     for target in targets:
-        if target["input"] not in existing:
-            instrumented.graph.output.append(
-                helper.make_tensor_value_info(target["input"], TensorProto.FLOAT, None))
+        name = target["input"]
+        peak = f"{name}{PEAK}"
+        if peak in existing:
+            continue
+        rank = int(target.get("rank") or 4)
+        axes = [i for i in range(rank) if i != 1]
+        instrumented.graph.node.append(
+            helper.make_node("Abs", [name], [f"{peak}_abs"], name=f"{peak}_abs"))
+        if reduce_takes_axes_input:
+            axes_name = f"{peak}_axes"
+            instrumented.graph.initializer.append(
+                numpy_helper.from_array(np.array(axes, np.int64), axes_name))
+            node = helper.make_node("ReduceMax", [f"{peak}_abs", axes_name], [peak],
+                                    name=peak, keepdims=0)
+        else:
+            node = helper.make_node("ReduceMax", [f"{peak}_abs"], [peak],
+                                    name=peak, axes=axes, keepdims=0)
+        instrumented.graph.node.append(node)
+        instrumented.graph.output.append(
+            helper.make_tensor_value_info(peak, TensorProto.FLOAT, None))
     return instrumented
 
 
 def accumulate_ranges(outputs: dict, targets: list[dict], ranges: dict) -> dict:
     """Per-input-channel peak magnitude, taken over everything seen so far."""
     for target in targets:
-        activation = np.asarray(outputs[target["input"]], np.float32)
-        axes = tuple(i for i in range(activation.ndim) if i != 1)
-        peak = np.abs(activation).max(axis=axes)
+        peak_name = f"{target['input']}{PEAK}"
+        if peak_name in outputs:
+            peak = np.asarray(outputs[peak_name], np.float32).reshape(-1)
+        else:
+            # A graph instrumented the old way, or a caller passing raw tensors.
+            activation = np.asarray(outputs[target["input"]], np.float32)
+            axes = tuple(i for i in range(activation.ndim) if i != 1)
+            peak = np.abs(activation).max(axis=axes)
         previous = ranges.get(target["node"])
         ranges[target["node"]] = peak if previous is None else np.maximum(previous, peak)
     return ranges
