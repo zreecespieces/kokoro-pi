@@ -70,6 +70,11 @@ def session_for(model: Path, library: Path | None, threads: int):
     options.intra_op_num_threads = threads
     options.inter_op_num_threads = 1
     options.log_severity_level = 3
+    # A build stands four sessions up in sequence, and the allocation arena
+    # keeps what it frees -- which is the right trade for a resident service and
+    # the wrong one here, where the peak is what decides whether this finishes.
+    # `serve` builds its own options and keeps the arena.
+    options.enable_cpu_mem_arena = False
     if library:
         options.register_custom_ops_library(str(library))
     return ort.InferenceSession(str(model), sess_options=options, providers=["CPUExecutionProvider"])
@@ -223,11 +228,15 @@ def main(argv: list[str] | None = None) -> None:
         instrumented_path.unlink()
         quantise.save_ranges(models / "calibration.npz", ranges)
 
-        quantised, report = quantise.build(fused, targets, ranges)
+        # `fused` is finished with -- it was written to disk in stage 3 and
+        # nothing below reads it -- so the int8 model is built over the top of
+        # it rather than beside it.
+        quantised, report = quantise.build(fused, targets, ranges, in_place=True)
+        del fused
         onnx.save(quantised, str(models / INT8_MODEL))
-        del quantised, fused
+        del quantised
         gc.collect()
-        provenance["int8"] = {"corpus": str(args.corpus.name), "utterances": len(corpus_texts),
+        provenance["int8"] = {"corpus": corpus_path.name, "utterances": len(corpus_texts),
                               **quantise.summarise(report)}
         variants["int8"] = {"model": INT8_MODEL, "custom_ops": [LIBRARY], "backend": "int8-fused"}
         active = "int8"

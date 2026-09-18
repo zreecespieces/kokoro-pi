@@ -163,9 +163,19 @@ def pack(weight: np.ndarray, activation_scale: np.ndarray) -> tuple[np.ndarray, 
     return packed.transpose(0, 4, 2, 1, 3).copy(), output_scale.astype(np.float32)
 
 
-def build(model: onnx.ModelProto, targets: list[dict], ranges: dict) -> tuple[onnx.ModelProto, list[dict]]:
-    quantised = onnx.ModelProto()
-    quantised.CopyFrom(model)
+def build(model: onnx.ModelProto, targets: list[dict], ranges: dict,
+          in_place: bool = False) -> tuple[onnx.ModelProto, list[dict]]:
+    """Rewrite every target as a QuantConv2d.
+
+    `in_place` rewrites the model it is given instead of copying it, which
+    matters on a Pi: the copy is a second whole model in memory beside the first,
+    and the caller that passes True has no use for the original afterwards.
+    """
+    if in_place:
+        quantised = model
+    else:
+        quantised = onnx.ModelProto()
+        quantised.CopyFrom(model)
     initializers = {i.name: i for i in quantised.graph.initializer}
     nodes = {n.name: n for n in quantised.graph.node}
     report = []
