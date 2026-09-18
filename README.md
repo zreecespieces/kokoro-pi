@@ -13,7 +13,7 @@ Same model, same voice, **~2× faster synthesis** and speech that **starts 6× s
 because the vocoder's convolutions run through a hand-written int8 ARM kernel and long
 text is streamed clause by clause.
 
-[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Quality](docs/quality.md) · [Samples](samples) · [API](#http-api)
+[Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Roadmap](docs/roadmap.md) · [Quality](docs/quality.md) · [Samples](samples) · [API](#http-api)
 
 </div>
 
@@ -147,6 +147,9 @@ Reading these honestly:
 
 The graph rewrites look modest here (1.10–1.15×) because these totals include the text
 front end, which they do not touch. On model inference alone they are worth 1.35×.
+
+Where the next speedup is, what it is worth, and the measured dead ends:
+**[roadmap](docs/roadmap.md)**.
 
 Reproduce on your own hardware:
 

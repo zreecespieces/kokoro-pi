@@ -117,14 +117,29 @@ everything else 3.0%. Generator convolutions by group: `resblocks.5` 518.6 ms,
 `resblocks.4` 323.4, `resblocks.2` 323.0, `resblocks.1` 219.6, `resblocks.3` 161.1,
 `resblocks.0` 111.4, `ups.1` 92.9, `ups.0` 48.0 — 1815 ms, 64.3% of the run.
 
+## Threads
+
+One synthesis does not use four cores well:
+
+| Threads | Median, one paragraph | Speedup | Efficiency |
+|---|---:|---:|---:|
+| 1 | 11.71 s | 1.00× | 100% |
+| 2 | 6.79 s | 1.72× | 86% |
+| 4 | 5.26 s | 2.23× | 56% |
+
+Use 4 anyway — 5.26 s beats 6.79 s and nothing else is asking for the cores. But
+the inefficiency is not recoverable by synthesising two clauses at once: that
+measures **slower** (0.73–0.86×), whichever way it is arranged, which is
+evidence the constraint is memory bandwidth rather than idle cores. The
+[roadmap](roadmap.md) has the numbers and what follows from them.
+
 ## What is left on the table
 
-- **int16 activations for the two sensitive groups.** 16-bit activations everywhere
-  measured 0.68 dB; a mixed build should reach roughly 1.8× at floor-level quality.
-  Needs an `SMLAL` path in the kernel.
-- **`ConvTranspose` in int8** — 5.8% of run time, currently float because the kernel has
-  no transposed form.
-- **`conv_post`** — 0.4%, skipped because 22 output channels is not a multiple of four.
+The int8 kernel runs at 451 GOP/s against a ~614 GOP/s ceiling, so it is 73%
+done and there is no large win left inside it. The remaining gains are in the
+model and in memory traffic: a frame-rate vocoder is worth 3–5×, fusing residual
+blocks to stop streaming 12 MB tensors is worth 1.2–1.5×, and there is a list of
+measured dead ends so nobody repeats them — **[roadmap](roadmap.md)**.
 
 ## Reproducing
 

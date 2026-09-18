@@ -55,6 +55,11 @@ nothing.
 
 Restart after editing: `systemctl --user restart kokoro-pi`.
 
+`kokoro-pi config` reads the file and the environment. It cannot see flags passed
+to a *running* service — `SERVE_ARGS` in the unit, for instance — so for what a
+live service is doing, ask it: `curl -s localhost:8080/readyz`, or start it with
+`--print-config`.
+
 ## Everything
 
 | Setting | File key / env | Default | Meaning |

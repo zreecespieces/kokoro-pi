@@ -236,7 +236,7 @@ def build_handler(engine: Engine, settings):
                                  "voice": engine.voice, "voices": len(engine.voices()),
                                  "lang": engine.lang, "threads": engine.threads,
                                  "format": default_format, "stream": settings.stream,
-                                 "busy": engine.lock.locked()})
+                                 "wait_seconds": wait_seconds, "busy": engine.lock.locked()})
             elif route.path == "/v1/voices":
                 self.reply(200, {"voices": engine.voices(), "default": engine.voice,
                                  "languages": {name: engine.language_for(name) for name in engine.voices()}})
