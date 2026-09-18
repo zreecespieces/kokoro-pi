@@ -115,6 +115,18 @@ your `PATH` on purpose.
 models. They are derived rather than redistributed, so run `kokoro-pi build` once
 (a 177 MB download, then a few minutes of calibration).
 
+**You upgraded the package and the kernel did not change** — expected, and worth
+knowing. `kokoro-pi build` copies the operator library *into* the models directory and
+records its checksum in the manifest, so a models directory is self-contained and a
+package upgrade does not reach into it. To pick up a new kernel, rebuild:
+
+```bash
+kokoro-pi build --models ~/.kokoro-pi/models     # or KOKORO_PI_REBUILD=1 ./install.sh
+```
+
+The upside of the same design is that upgrading the package can never leave a service
+running a library its manifest does not describe.
+
 **It compiled the operators even though you installed a wheel** — that happens when pip
 fell back to the source distribution, which it does when no wheel matches your platform.
 Check what you got:
