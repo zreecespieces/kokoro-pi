@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover
 HERE = Path(__file__).resolve().parent
 BUNDLE = ("native", "corpus")
 LIBRARY = "libkokoro_pi_ops.so"
+DOTPROD_LIBRARY = "libkokoro_pi_ops.dotprod.so"
 
 
 class BuildPy(_build_py):
@@ -55,11 +56,26 @@ class BuildPy(_build_py):
         if not script.exists():
             print("kokoro-pi: no native sources to build", file=sys.stderr)
             return
+        # A wheel is compiled on a machine that is not the one it will run on,
+        # and the kernel chooses its SDOT path with #if at compile time -- so a
+        # single ARM library is either illegal on a Pi 4 or slow on a Pi 5.
+        # Build both and let paths.py pick at import time.
+        builds = [(LIBRARY, None)]
+        if os.uname().machine in ("aarch64", "arm64"):
+            builds = [(LIBRARY, "-march=armv8-a"),
+                      (DOTPROD_LIBRARY, "-march=armv8.2-a+dotprod")]
+        for name, arch in builds:
+            self.compile_library(script, target / name, arch)
+
+    def compile_library(self, script: Path, out: Path, arch: str | None) -> None:
+        environment = dict(os.environ)
+        if arch:
+            environment["ARCH_FLAGS"] = arch
         try:
             # Absolute, because build.sh cd's to its own directory first and a
             # relative output path would then point somewhere else entirely.
-            subprocess.run(["bash", str(script.resolve()), str((target / LIBRARY).resolve())],
-                           check=True)
+            subprocess.run(["bash", str(script.resolve()), str(out.resolve())],
+                           check=True, env=environment)
         except (subprocess.CalledProcessError, FileNotFoundError) as error:
             if os.environ.get("KOKORO_PI_REQUIRE_NATIVE"):
                 # Releasing a wheel that is tagged for a platform and carries no

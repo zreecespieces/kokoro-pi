@@ -49,10 +49,14 @@ jobs:
           import glob, zipfile, sys
           wheel = glob.glob("dist/*.whl")[0]
           names = zipfile.ZipFile(wheel).namelist()
-          library = [n for n in names if n.endswith("libkokoro_pi_ops.so")]
+          library = [n for n in names if n.endswith(".so")]
           assert library, f"{wheel} has no operator library:\n" + "\n".join(names)
           assert "manylinux" in wheel, f"{wheel} is not a manylinux wheel"
-          print(f"{wheel}: {library[0]}")
+          if "aarch64" in wheel:
+              # Both, or the wheel is either illegal on a Pi 4 or slow on a Pi 5.
+              assert any(n.endswith("libkokoro_pi_ops.dotprod.so") for n in library), library
+              assert any(n.endswith("_bundled/libkokoro_pi_ops.so") for n in library), library
+          print(f"{wheel}: " + ", ".join(sorted(library)))
           PY
 
       - uses: actions/upload-artifact@v4
